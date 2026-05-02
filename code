@@ -10,9 +10,7 @@ import imageio_ffmpeg
 
 mpl.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
 
-# --------------------------------------------------
-# 1. LOAD ALL PLAYER TRACKING FROM JSONL.BZ2
-# --------------------------------------------------
+#player tracking loading tingz
 def load_all_player_tracking(file_path, max_rows=None, use_smoothed=True):
     rows = []
 
@@ -95,9 +93,7 @@ def load_all_player_tracking(file_path, max_rows=None, use_smoothed=True):
     return df
 
 
-# --------------------------------------------------
-# 2. DRAW PITCH
-# --------------------------------------------------
+#pitch animating n what not
 def draw_pitch(ax, pitch_length=105, pitch_width=68):
     ax.set_xlim(-pitch_length / 2 - 2, pitch_length / 2 + 2)
     ax.set_ylim(-pitch_width / 2 - 2, pitch_width / 2 + 2)
@@ -148,9 +144,7 @@ def draw_pitch(ax, pitch_length=105, pitch_width=68):
     return ax
 
 
-# --------------------------------------------------
-# 3. ANIMATE ALL PLAYERS WITH FRANCE AND AUSTRALIA FORMATION LINES
-# --------------------------------------------------
+#Player animation and formation lines
 def animate_all_players(
     tracking_data,
     save_path=None,
@@ -225,7 +219,7 @@ def animate_all_players(
         player_labels[(team_side, jersey_num)] = label
 
     # France connection lines.
-    # These are generic formation connections based on jersey numbers in your data.
+    # These are formation connections based on jersey numbers in data.
     # Adjust these pairs if you want a different tactical shape.
     france_connection_pairs = [
          # Back line
@@ -529,9 +523,7 @@ def animate_all_players(
     return HTML(anim.to_jshtml())
 
 
-# --------------------------------------------------
-# 4. MAIN
-# --------------------------------------------------
+# main func
 if __name__ == "__main__":
     file_path = r"C:\Users\stafa\Downloads\3819.jsonl.bz2"
 
