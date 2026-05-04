@@ -1,0 +1,702 @@
+import json
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("TkAgg")   # remove this line if you want plots to pop up interactively
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.patches import Rectangle, Arc
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+from collections import defaultdict, Counter
+
+DATA_PATH = r"C:\Users\stafa\Downloads\3819.json"
+OUT_DIR   = r"C:\Users\stafa\Downloads\soccerproject"
+
+FRANCE_PLAYERS = {
+    'Adrien Rabiot', 'Antoine Griezmann', 'Aurélien Tchouaméni',
+    'Benjamin Pavard', 'Dayot Upamecano', 'Hugo Lloris',
+    'Ibrahima Konaté', 'Jules Kounde', 'Kingsley Coman',
+    'Kylian Mbappé', 'Lucas Hernández', 'Olivier Giroud',
+    'Ousmane Dembele', 'Theo Hernandez', 'Youssouf Fofana'
+}
+ 
+AUS_JERSEY_NAMES = {
+    "1": "Ryan (GK)",      "2": "Degenek (RB)",   "3": "Atkinson (LB)",
+    "4": "Rowles (CB)",    "5": "Souttar (CB)",    "6": "Kalulu (CB)",
+    "7": "Leckie (RW)",    "9": "Duke (ST)",        "10": "Maclaren (ST)",
+    "11": "Irvine (CM)",   "12": "Nabbout (LW)",   "13": "Mooy (CDM)",
+    "14": "McGree (CM)",   "15": "Baccus (CM)",    "16": "Hrustic (CAM)",
+    "17": "Grant (CB)",    "19": "Souttar (CB)",   "20": "Flori (LW)",
+    "21": "Cummings (ST)", "22": "Irvine (CM)",    "23": "Atkinson (LB)",
+    "24": "Behich (LB)",   "25": "Mabil (LW)",     "26": "Kuol (ST)",
+}
+ 
+SHORT_NAME = {
+    'Lucas Hernández':     'L.Hernández',
+    'Theo Hernandez':      'T.Hernandez',
+    'Aurélien Tchouaméni': 'Tchouaméni',
+    'Dayot Upamecano':     'Upamecano',
+    'Ibrahima Konaté':     'Konaté',
+    'Benjamin Pavard':     'Pavard',
+    'Antoine Griezmann':   'Griezmann',
+    'Ousmane Dembele':     'Dembele',
+    'Kylian Mbappé':       'Mbappé',
+    'Olivier Giroud':      'Giroud',
+    'Adrien Rabiot':       'Rabiot',
+    'Hugo Lloris':         'Lloris',
+    'Jules Kounde':        'Kounde',
+    'Kingsley Coman':      'Coman',
+    'Youssouf Fofana':     'Fofana',
+}
+ 
+# 1.  LOAD & FLATTEN
+
+ 
+def load_and_flatten(path):
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+ 
+    rows = []
+    for r in raw:
+        ge      = r.get("gameEvents")       or {}
+        it      = r.get("initialTouch")     or {}
+        pe      = r.get("possessionEvents") or {}
+        fo_raw  = r.get("fouls")            or {}
+        fo      = fo_raw if isinstance(fo_raw, dict) else (fo_raw[0] if fo_raw else {})
+        gr      = r.get("grades")           or {}
+        ball_raw = r.get("ball") or []
+        ball    = ball_raw[0] if isinstance(ball_raw, list) and ball_raw else {}
+ 
+        home_players = {str(p["jerseyNum"]): p for p in (r.get("homePlayers") or [])}
+        away_players = {str(p["jerseyNum"]): p for p in (r.get("awayPlayers") or [])}
+ 
+        rows.append({
+            # timing
+            "eventTime":       r.get("eventTime"),
+            "startTime":       r.get("startTime"),
+            "period":          ge.get("period"),
+            # game event
+            "homeTeam":        ge.get("homeTeam"),
+            "teamName":        ge.get("teamName"),
+            "playerName":      ge.get("playerName"),
+            "setpieceType":    ge.get("setpieceType"),
+            "startGameClock":  ge.get("startGameClock"),
+            "formattedClock":  ge.get("startFormattedGameClock"),
+            # initial touch
+            "initialPressureType": it.get("initialPressureType"),
+            # possession event
+            "possEventType":   pe.get("possessionEventType"),
+            "pressureType":    pe.get("pressureType"),
+            "pressurePlayer":  pe.get("pressurePlayerName"),
+            "opportunityType": pe.get("opportunityType"),
+            "linesBroken":     pe.get("linesBrokenType"),
+            "betterOption":    pe.get("betterOptionType"),
+            "createsSpace":    pe.get("createsSpace"),
+            # pass / cross
+            "passer":          pe.get("passerPlayerName"),
+            "passType":        pe.get("passType"),
+            "passOutcome":     pe.get("passOutcomeType"),
+            "target":          pe.get("targetPlayerName"),
+            "receiver":        pe.get("receiverPlayerName"),
+            "accuracyType":    pe.get("accuracyType"),
+            "crossType":       pe.get("crossType"),
+            "crossOutcome":    pe.get("crossOutcomeType"),
+            # shot
+            "shooter":         pe.get("shooterPlayerName"),
+            "shotType":        pe.get("shotType"),
+            "shotNature":      pe.get("shotNatureType"),
+            "shotOutcome":     pe.get("shotOutcomeType"),
+            # challenge
+            "challengeType":   pe.get("challengeType"),
+            "challenger":      pe.get("challengerPlayerName"),
+            "carrier":         pe.get("carrierPlayerName"),
+            "dribbler":        pe.get("dribblerPlayerName"),
+            # carry
+            "carryType":       pe.get("carryType"),
+            "carryIntent":     pe.get("carryIntent"),
+            "carrySuccessful": pe.get("carrySuccessful"),
+            "ballCarrier":     pe.get("ballCarrierPlayerName"),
+            # grades
+            "passerGrade":     gr.get("passerGrade"),
+            "receiverGrade":   gr.get("receiverGrade"),
+            "targetGrade":     gr.get("targetGrade"),
+            "shooterGrade":    gr.get("shooterGrade"),
+            "dribbleGrade":    gr.get("dribblerGrade"),
+            "challengerGrade": gr.get("challengerGrade"),
+            "carrierGrade":    gr.get("carrierGrade"),
+            "ballCarrierGrade":gr.get("ballCarrierGrade"),
+            # foul
+            "foulType":        fo.get("foulType"),
+            "offenseType":     fo.get("onFieldOffenseType"),
+            "victim":          fo.get("victimPlayerName"),
+            # ball position at event moment
+            "ball_x":          ball.get("x"),
+            "ball_y":          ball.get("y"),
+            # player position snapshots (dicts keyed by jerseyNum string)
+            "_home_players":   home_players,
+            "_away_players":   away_players,
+        })
+ 
+    df = pd.DataFrame(rows)
+ 
+    # Normalise: flip period 2 so France always attacks right (+x)
+    mask = df["period"] == 2
+    df.loc[mask, "ball_x"] *= -1
+    df.loc[mask, "ball_y"] *= -1
+ 
+    print(f"Loaded {len(df)} events")
+    return df
+ 
+ 
+
+# 2.  PITCH DRAWING HELPER
+
+ 
+def draw_pitch(ax, length=105, width=68, line_color="white",
+               bg="#2d5c2d", lw=1.5):
+    ax.set_facecolor(bg)
+    ax.set_xlim(-length/2 - 3, length/2 + 3)
+    ax.set_ylim(-width/2 - 3, width/2 + 3)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    kw = dict(edgecolor=line_color, fill=False, linewidth=lw)
+    ax.add_patch(Rectangle((-length/2, -width/2), length, width, **kw))
+    ax.plot([0, 0], [-width/2, width/2], color=line_color, lw=lw)
+    ax.add_patch(plt.Circle((0, 0), 9.15, **kw))
+    ax.plot(0, 0, "o", color=line_color, ms=2)
+    for side in [-1, 1]:
+        xp = side * length / 2
+        ax.add_patch(Rectangle((xp - side*16.5, -20.15), side*16.5, 40.3, **kw))
+        ax.add_patch(Rectangle((xp - side*5.5,  -9.15),  side*5.5,  18.3, **kw))
+        ax.plot(xp - side*11, 0, "o", color=line_color, ms=2)
+        t1, t2 = (127, 233) if side == 1 else (307, 413)
+        ax.add_patch(Arc((xp - side*11, 0), 18.3, 18.3,
+                         theta1=t1, theta2=t2, color=line_color, lw=lw))
+        ax.plot([xp, xp], [-3.66, 3.66], color=line_color, lw=3)
+    ax.annotate("", xy=(length/2 - 2, -width/2 + 2),
+                xytext=(length/2 - 10, -width/2 + 2),
+                arrowprops=dict(arrowstyle="->", color=line_color, lw=1, alpha=0.5))
+    ax.text(length/2 - 6, -width/2 + 4, "France attack →",
+            color=line_color, fontsize=7, alpha=0.5, ha="center")
+ 
+ 
+def add_third_lines(ax):
+    for x in [-17.5, 17.5]:
+        ax.axvline(x, color="white", lw=0.8, alpha=0.35, ls="--", zorder=1)
+ 
+ 
+def add_third_counts(ax, xs, width=68):
+    d = sum(1 for x in xs if x < -17.5)
+    m = sum(1 for x in xs if -17.5 <= x <= 17.5)
+    a = sum(1 for x in xs if x > 17.5)
+    total = max(d + m + a, 1)
+    for x_pos, count, label in [(-35, d, "Def"), (0, m, "Mid"), (35, a, "Att")]:
+        ax.text(x_pos, -width/2 - 1.5,
+                f"{label}\n{count} ({100*count//total}%)",
+                ha="center", va="top", color="white", fontsize=8,
+                bbox=dict(facecolor="#222", edgecolor="none", alpha=0.7, pad=2))
+ 
+ 
+# 3.  PASSING NETWORK
+
+ 
+def plot_passing_network(df):
+    print("[1/6] Passing network...")
+ 
+    france_passes = df[
+        (df["homeTeam"] == True) &
+        (df["possEventType"] == "PA") &
+        df["passer"].notna() &
+        df["ball_x"].notna()
+    ].copy()
+ 
+    # Node position = avg ball position when player passes
+    node_pos = (france_passes.groupby("passer")[["ball_x", "ball_y"]]
+                .mean()
+                .rename(columns={"ball_x": "x", "ball_y": "y"}))
+ 
+    # Edge counts (completed passes)
+    completed    = france_passes[france_passes["passOutcome"] == "C"]
+    edge_counts  = defaultdict(int)
+    all_attempts = defaultdict(int)
+ 
+    for _, row in completed.iterrows():
+        if pd.notna(row["receiver"]):
+            edge_counts[(row["passer"], row["receiver"])] += 1
+ 
+    for _, row in france_passes.iterrows():
+        if pd.notna(row["target"]):
+            all_attempts[(row["passer"], row["target"])] += 1
+ 
+    fig, ax = plt.subplots(figsize=(14, 9), facecolor="#1a1a1a")
+    draw_pitch(ax)
+ 
+    max_edge = max(edge_counts.values(), default=1)
+ 
+    # Draw edges
+    for (passer, receiver), count in edge_counts.items():
+        if count < 2:
+            continue
+        if passer not in node_pos.index or receiver not in node_pos.index:
+            continue
+        x1, y1 = node_pos.loc[passer, ["x", "y"]]
+        x2, y2 = node_pos.loc[receiver, ["x", "y"]]
+        comp = count / max(all_attempts.get((passer, receiver), 1), 1)
+        lw   = 0.8 + 5.5 * (count / max_edge)
+        col  = plt.cm.RdYlGn(comp)
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                    arrowprops=dict(arrowstyle="-|>", color=col,
+                                   lw=lw, mutation_scale=14, alpha=0.85))
+ 
+    # Draw nodes
+    pass_counts = france_passes.groupby("passer").size()
+    for player, (px, py) in node_pos.iterrows():
+        n    = pass_counts.get(player, 1)
+        size = 150 + 700 * (n / pass_counts.max())
+        ax.scatter(px, py, s=size, c="#1f77b4", zorder=5,
+                   edgecolors="white", linewidths=2)
+        label = SHORT_NAME.get(player, player.split()[-1])
+        ax.text(px, py + 3, label, ha="center", va="bottom",
+                fontsize=8, color="white", weight="bold", zorder=6)
+ 
+    sm = ScalarMappable(cmap="RdYlGn", norm=Normalize(0, 1))
+    sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax, fraction=0.022, pad=0.02)
+    cb.set_label("Pass completion rate", color="white", fontsize=9)
+    plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
+    cb.ax.yaxis.set_tick_params(color="white")
+ 
+    ax.set_title("France Passing Network — FRA vs AUS (WC MD1 2022)",
+                 color="white", fontsize=13, weight="bold", pad=10)
+    ax.text(0, -37,
+            "Nodes = avg passing position  |  Size = pass volume  |  "
+            "Arrow width = frequency  |  Colour = completion%",
+            ha="center", color="#aaaaaa", fontsize=7.5)
+ 
+    out = f"{OUT_DIR}/passing_network_france.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+ 
+ 
+
+# 4.  PRESS MAP
+
+ 
+def plot_press_map(df):
+    print("[2/6] Press map...")
+ 
+    # Left: AUS pressing France (France has ball)
+    aus_press = df[
+        (df["homeTeam"] == True) &
+        (df["pressureType"].isin(["P", "A"])) &
+        df["ball_x"].notna()
+    ].copy()
+    aus_full = aus_press[aus_press["pressureType"] == "P"]
+ 
+    # Right: France pressing AUS (AUS has ball)
+    # Keep same orientation — AUS ball is at negative x (their half)
+    fra_press = df[
+        (df["homeTeam"] == False) &
+        (df["pressureType"].isin(["P", "A"])) &
+        df["ball_x"].notna()
+    ].copy()
+    fra_full = fra_press[fra_press["pressureType"] == "P"]
+ 
+    fig, axes = plt.subplots(1, 2, figsize=(20, 8), facecolor="#1a1a1a")
+ 
+    datasets = [
+        (axes[0], aus_press, aus_full,
+         "AUS Pressure on France\n(France in possession | France attacks →)",
+         "Where France were pressured by Australia"),
+        (axes[1], fra_press, fra_full,
+         "France Pressure on AUS\n(AUS in possession | France attacks →)",
+         "Where France pressed Australia  (AUS half = negative x)"),
+    ]
+ 
+    for ax, data, full_data, title, subtitle in datasets:
+        draw_pitch(ax)
+        add_third_lines(ax)
+        xs = data["ball_x"].values
+        ys = data["ball_y"].values
+ 
+        ax.hexbin(xs, ys, gridsize=18, cmap="hot", alpha=0.70,
+                  extent=[-52.5, 52.5, -34, 34], mincnt=1, zorder=2)
+ 
+        ax.scatter(full_data["ball_x"], full_data["ball_y"],
+                   c="cyan", s=20, alpha=0.55, zorder=4,
+                   label=f"Player Pressured (n={len(full_data)})")
+ 
+        add_third_counts(ax, xs)
+        ax.legend(facecolor="#333", labelcolor="white", fontsize=8, loc="upper left")
+        ax.set_title(title, color="white", fontsize=11, weight="bold", pad=6)
+        ax.text(0, 38, subtitle, ha="center", color="#aaaaaa", fontsize=8)
+ 
+    sm = ScalarMappable(cmap="hot")
+    sm.set_array([])
+    cb = fig.colorbar(sm, ax=axes, fraction=0.015, pad=0.02)
+    cb.set_label("Pressure density", color="white", fontsize=9)
+    plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
+    cb.ax.yaxis.set_tick_params(color="white")
+ 
+    fig.suptitle(
+        "Pressure Maps — FRA vs AUS (WC MD1 2022)\n"
+        "Both maps: France attacks →    |    AUS possession = ball at negative x",
+        color="white", fontsize=13, weight="bold", y=1.02)
+ 
+    out = f"{OUT_DIR}/press_map.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+ 
+ 
+
+# 5.  LINES BROKEN
+
+ 
+LINE_COLORS = {
+    "D":   ("#ff4444", "Defense only"),
+    "M":   ("#ffaa00", "Midfield only"),
+    "MD":  ("#ff6600", "Mid + Defense"),
+    "A":   ("#44ff44", "Attack only"),
+    "AM":  ("#00ffaa", "Attack + Mid"),
+    "AD":  ("#ff00ff", "Attack + Defense (bypasses mid)"),
+    "AMD": ("#ffffff", "All three lines"),
+}
+ 
+def plot_lines_broken(df):
+    print("[3/6] Lines broken...")
+ 
+    france_lb = df[
+        (df["homeTeam"] == True) &
+        df["linesBroken"].notna() &
+        df["ball_x"].notna()
+    ].copy()
+ 
+    # Flip AUS so they also attack right on their map
+    aus_lb = df[
+        (df["homeTeam"] == False) &
+        df["linesBroken"].notna() &
+        df["ball_x"].notna()
+    ].copy()
+    aus_lb = aus_lb.copy()
+    aus_lb["ball_x"] = -aus_lb["ball_x"]
+    aus_lb["ball_y"] = -aus_lb["ball_y"]
+ 
+    fig, axes = plt.subplots(1, 2, figsize=(18, 7), facecolor="#1a1a1a")
+ 
+    for ax, data, title in [
+        (axes[0], france_lb, "France Line-Breaking Events"),
+        (axes[1], aus_lb,    "Australia Line-Breaking Events"),
+    ]:
+        draw_pitch(ax)
+        patches = []
+        for ltype, (col, label) in LINE_COLORS.items():
+            sub = data[data["linesBroken"] == ltype]
+            if sub.empty:
+                continue
+            ax.scatter(sub["ball_x"], sub["ball_y"],
+                       c=col, s=90, alpha=0.85, zorder=4,
+                       edgecolors="#333", linewidths=0.5)
+            patches.append(mpatches.Patch(color=col,
+                                          label=f"{label} (n={len(sub)})"))
+        ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+                  fontsize=8, loc="upper left", framealpha=0.8)
+        ax.set_title(title, color="white", fontsize=12, weight="bold", pad=8)
+ 
+    fig.suptitle("Line-Breaking Events — FRA vs AUS (WC MD1 2022)",
+                 color="white", fontsize=14, weight="bold", y=1.01)
+ 
+    out = f"{OUT_DIR}/lines_broken.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+ 
+
+# 6.  CHANCE CREATION MAP
+
+ 
+OPP_INFO = {
+    "C": ("#ff0000", "Chance Created (should score)"),
+    "H": ("#ff8800", "Half Chance"),
+    "D": ("#ffff00", "Dangerous Position"),
+    "N": ("#4488ff", "Neg Chance (vs France)"),
+    "P": ("#00aaff", "Neg Dangerous (vs France)"),
+}
+ 
+def plot_chance_creation(df):
+    print("[4/6] Chance creation map...")
+ 
+    opps  = df[df["opportunityType"].notna() & df["ball_x"].notna()].copy()
+    goals = df[df["shotOutcome"] == "G"].copy()
+ 
+    fig, ax = plt.subplots(figsize=(14, 9), facecolor="#1a1a1a")
+    draw_pitch(ax)
+ 
+    patches = []
+    for otype, (col, label) in OPP_INFO.items():
+        sub = opps[opps["opportunityType"] == otype]
+        if sub.empty:
+            continue
+        xs = sub["ball_x"].copy()
+        ys = sub["ball_y"].copy()
+        # Flip negative events so they show from France's perspective
+        if otype in ["N", "P"]:
+            xs = -xs
+            ys = -ys
+        ax.scatter(xs, ys, c=col,
+                   s=200 if otype == "C" else 100,
+                   marker="*" if otype == "C" else "o",
+                   alpha=0.9, zorder=5,
+                   edgecolors="white" if otype == "C" else "none",
+                   linewidths=1)
+        patches.append(mpatches.Patch(color=col,
+                                      label=f"{label} (n={len(sub)})"))
+ 
+    # Goals
+    for _, g in goals.iterrows():
+        is_france = g["homeTeam"]
+        gx, gy   = g["ball_x"], g["ball_y"]
+        ax.scatter(gx, gy,
+                   c="#00ff00" if is_france else "#ff4444",
+                   s=450, marker="*", zorder=6,
+                   edgecolors="white", linewidths=1.5)
+        name = SHORT_NAME.get(g["shooter"],
+                              (g["shooter"] or "").split()[-1])
+        ax.text(gx, gy + 3.5, f"GOAL: {name}",
+                ha="center", fontsize=8, color="white",
+                weight="bold", zorder=7)
+ 
+    patches += [
+        mpatches.Patch(color="#00ff00", label="France Goal"),
+        mpatches.Patch(color="#ff4444", label="AUS Goal"),
+    ]
+    ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+              fontsize=9, loc="upper left", framealpha=0.85)
+    ax.set_title("Chance Creation & Goal Map — FRA vs AUS (WC MD1 2022)",
+                 color="white", fontsize=13, weight="bold", pad=10)
+ 
+    out = f"{OUT_DIR}/chance_creation_map.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+ 
+ 
+# 7.  PLAYER GRADES  (France only)
+
+ 
+def plot_player_grades(df):
+    print("[5/6] Player grades...")
+ 
+    grade_player_map = {
+        "passerGrade":      "passer",
+        "receiverGrade":    "receiver",
+        "targetGrade":      "target",
+        "shooterGrade":     "shooter",
+        "dribbleGrade":     "dribbler",
+        "challengerGrade":  "challenger",
+        "carrierGrade":     "carrier",
+        "ballCarrierGrade": "ballCarrier",
+    }
+ 
+    grade_rows = []
+    for _, row in df.iterrows():
+        for grade_col, player_col in grade_player_map.items():
+            grade  = row.get(grade_col)
+            player = row.get(player_col)
+            if pd.isna(grade) or not player:
+                continue
+            if player not in FRANCE_PLAYERS:
+                continue
+            grade_rows.append({"player": player, "grade": float(grade)})
+ 
+    if not grade_rows:
+        print("  No France grade data found.")
+        return
+ 
+    gdf     = pd.DataFrame(grade_rows)
+    summary = (gdf.groupby("player")
+                  .agg(avg_grade=("grade", "mean"), n=("grade", "count"))
+                  .reset_index()
+                  .sort_values("avg_grade", ascending=True))
+ 
+    n_players  = len(summary)
+    fig_height = max(7, n_players * 0.6 + 2)
+    fig, ax    = plt.subplots(figsize=(12, fig_height), facecolor="#1a1a1a")
+    ax.set_facecolor("#1a1a1a")
+ 
+    colors = ["#ff4444" if g < -0.005 else
+              "#44ff44" if g >  0.005 else "#888888"
+              for g in summary["avg_grade"]]
+ 
+    bars = ax.barh(range(n_players), summary["avg_grade"],
+                   color=colors, alpha=0.85,
+                   edgecolor="#555", linewidth=0.5, height=0.65)
+ 
+    ax.set_yticks(range(n_players))
+    ax.set_yticklabels(summary["player"], fontsize=10, color="white")
+    ax.set_ylim(-0.7, n_players - 0.3)
+ 
+    xmax = summary["avg_grade"].abs().max()
+    ax.set_xlim(-xmax * 1.6, xmax * 1.6)
+ 
+    ax.axvline(0, color="white", lw=1.2, alpha=0.7)
+ 
+    for bar, (_, row) in zip(bars, summary.iterrows()):
+        x      = bar.get_width()
+        offset = xmax * 0.04 if x >= 0 else -xmax * 0.04
+        ha     = "left" if x >= 0 else "right"
+        ax.text(x + offset,
+                bar.get_y() + bar.get_height() / 2,
+                f"{row['avg_grade']:+.3f}  (n={int(row['n'])})",
+                va="center", ha=ha, color="white", fontsize=9)
+ 
+    ax.set_xlabel("Average PFF Grade  (−2 to +2,  0 = expected)",
+                  color="white", fontsize=10)
+    ax.set_title("France Player Average Grades — FRA vs AUS (WC MD1 2022)",
+                 color="white", fontsize=12, weight="bold", pad=12)
+    ax.tick_params(colors="white")
+    plt.setp(ax.get_xticklabels(), color="white")
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#555")
+ 
+    patches = [
+        mpatches.Patch(color="#44ff44", label="Above expected"),
+        mpatches.Patch(color="#888888", label="Expected (~0)"),
+        mpatches.Patch(color="#ff4444", label="Below expected"),
+    ]
+    ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+              fontsize=9, loc="lower right")
+ 
+    plt.tight_layout()
+    out = f"{OUT_DIR}/player_grades_france.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+ 
+ 
+# 8.  MBAPPE EVENT ANALYSIS
+
+ 
+def plot_mbappe_event_analysis(df):
+    print("[6/6] Mbappe event-level analysis...")
+ 
+    france_events = df[df["homeTeam"] == True].copy()
+    MBAPPE_J      = "10"
+ 
+    closest_dists, closest_jerseys, mbappe_xs, mbappe_ys = [], [], [], []
+ 
+    for _, row in france_events.iterrows():
+        hp     = row["_home_players"]
+        ap     = row["_away_players"]
+        mbappe = hp.get(MBAPPE_J)
+        if not mbappe:
+            continue
+ 
+        mx = mbappe.get("x", 0)
+        my = mbappe.get("y", 0)
+        if row["period"] == 2:
+            mx, my = -mx, -my
+ 
+        min_dist, min_j = 999, None
+        for jnum, p in ap.items():
+            ax_ = p.get("x", 0)
+            ay_ = p.get("y", 0)
+            if row["period"] == 2:
+                ax_, ay_ = -ax_, -ay_
+            d = np.sqrt((mx - ax_)**2 + (my - ay_)**2)
+            if d < min_dist:
+                min_dist = d
+                min_j    = jnum
+ 
+        closest_dists.append(min_dist)
+        closest_jerseys.append(min_j)
+        mbappe_xs.append(mx)
+        mbappe_ys.append(my)
+ 
+    if not closest_dists:
+        print("  No Mbappe data found.")
+        return
+ 
+    mdf = pd.DataFrame({
+        "dist":   closest_dists,
+        "jersey": closest_jerseys,
+        "x":      mbappe_xs,
+        "y":      mbappe_ys,
+    })
+ 
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7), facecolor="#1a1a1a")
+ 
+    # Left: position heatmap coloured by defender distance
+    ax = axes[0]
+    draw_pitch(ax)
+    sc = ax.scatter(mdf["x"], mdf["y"], c=mdf["dist"],
+                    cmap="RdYlGn", vmin=0, vmax=20,
+                    s=15, alpha=0.6, zorder=4)
+    cb = fig.colorbar(sc, ax=ax, fraction=0.025, pad=0.02)
+    cb.set_label("Distance to closest defender (m)", color="white", fontsize=9)
+    plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
+    cb.ax.yaxis.set_tick_params(color="white")
+    ax.set_title("Mbappé Position x Defender Distance\n"
+                 "(Green = space, Red = tight marking)",
+                 color="white", fontsize=11, weight="bold")
+ 
+    # Right: who marked him most
+    ax2 = axes[1]
+    ax2.set_facecolor("#1a1a1a")
+    jcounts = Counter(closest_jerseys)
+    sorted_j = sorted(jcounts.items(), key=lambda x: x[1], reverse=True)[:10]
+    labels   = [AUS_JERSEY_NAMES.get(j, f"#{j}") for j, _ in sorted_j]
+    counts   = [c for _, c in sorted_j]
+    total    = sum(jcounts.values())
+    pcts     = [100 * c / total for c in counts]
+ 
+    bars = ax2.barh(labels[::-1], counts[::-1],
+                    color="#1f77b4", alpha=0.85,
+                    edgecolor="#555", linewidth=0.5)
+    for bar, pct in zip(bars, pcts[::-1]):
+        ax2.text(bar.get_width() + 3,
+                 bar.get_y() + bar.get_height() / 2,
+                 f"{pct:.1f}%", va="center", color="white", fontsize=9)
+ 
+    ax2.set_xlabel("Events as closest defender to Mbappé",
+                   color="white", fontsize=10)
+    ax2.set_title("Who Marked Mbappé Most?\n(event-level snapshots)",
+                  color="white", fontsize=11, weight="bold")
+    ax2.tick_params(colors="white")
+    plt.setp(ax2.get_yticklabels(), color="white", fontsize=9)
+    plt.setp(ax2.get_xticklabels(), color="white")
+    for spine in ax2.spines.values():
+        spine.set_edgecolor("#555")
+ 
+    pct_tight = 100 * (mdf["dist"] <= 5).mean()
+    ax2.text(0.98, 0.05,
+             f"Mean dist: {mdf['dist'].mean():.1f}m\n"
+             f"Within 5m: {pct_tight:.1f}% of events",
+             transform=ax2.transAxes, ha="right", va="bottom",
+             color="#cccccc", fontsize=9,
+             bbox=dict(facecolor="#333", edgecolor="#555", alpha=0.8, pad=5))
+ 
+    fig.suptitle("Mbappé Defensive Attention — Event-Level Analysis",
+                 color="white", fontsize=13, weight="bold", y=1.01)
+ 
+    plt.tight_layout()
+    out = f"{OUT_DIR}/mbappe_event_analysis.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+ 
+ 
+if __name__ == "__main__":
+    print("Loading data...")
+    df = load_and_flatten(DATA_PATH)
+ 
+    plot_passing_network(df)
+    plot_press_map(df)
+    plot_lines_broken(df)
+    plot_chance_creation(df)
+    plot_player_grades(df)
+    plot_mbappe_event_analysis(df)
+ 
+    print(f"\nAll done — files saved to {OUT_DIR}")
