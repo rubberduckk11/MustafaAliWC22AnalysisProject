@@ -1,5 +1,3 @@
-
- 
 import json
 import numpy as np
 import pandas as pd
@@ -693,6 +691,259 @@ def plot_mbappe_event_analysis(df):
     plt.close()
     print(f"  -> {out}")
 
+#Mbappe tackle stats
+def plot_mbappe_passes_shots(df):
+    print("Mbappe passes and shots...")
+
+    # ── Passes ──
+    mbappe_passes = df[
+        (df["passer"] == "Kylian Mbappé") &
+        (df["possEventType"] == "PA") &
+        df["ball_x"].notna() &
+        df["passOutcome"].notna()
+    ].copy()
+
+    # ── Shots ──
+    mbappe_shots = df[
+        (df["shooter"] == "Kylian Mbappé") &
+        df["ball_x"].notna()
+    ].copy()
+
+    if mbappe_passes.empty and mbappe_shots.empty:
+        print("  No Mbappe pass/shot data found.")
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(22, 8), facecolor="#1a1a1a")
+
+    # ════════════════════════════════════════════════════════════
+    # Panel 1: Pass map
+    # ════════════════════════════════════════════════════════════
+    ax = axes[0]
+    draw_pitch(ax)
+
+    completed  = mbappe_passes[mbappe_passes["passOutcome"] == "C"]
+    incomplete = mbappe_passes[mbappe_passes["passOutcome"] != "C"]
+
+    ax.scatter(completed["ball_x"], completed["ball_y"],
+               c="#44ff44", s=100, alpha=0.85, zorder=4,
+               edgecolors="#333", linewidths=0.5,
+               label=f"Completed (n={len(completed)})")
+    ax.scatter(incomplete["ball_x"], incomplete["ball_y"],
+               c="#ff4444", s=100, alpha=0.85, zorder=4,
+               edgecolors="#333", linewidths=0.5,
+               marker="X",
+               label=f"Incomplete (n={len(incomplete)})")
+
+    for _, row in mbappe_passes.iterrows():
+        if pd.notna(row["passType"]) and row["passType"] != "S":
+            ax.text(row["ball_x"], row["ball_y"] + 2,
+                    row["passType"],
+                    ha="center", fontsize=7, color="white", alpha=0.7)
+
+    total_passes = len(mbappe_passes)
+    comp_pct = 100 * len(completed) // max(total_passes, 1)
+
+    ax.legend(facecolor="#333", labelcolor="white", fontsize=9,
+              loc="upper left", framealpha=0.8)
+    ax.set_title(f"Mbappé — Pass Map\n"
+                 f"({total_passes} passes | {comp_pct}% completion)",
+                 color="white", fontsize=12, weight="bold", pad=8)
+
+    # ════════════════════════════════════════════════════════════
+    # Panel 2: Shot map
+    # ════════════════════════════════════════════════════════════
+    ax2 = axes[1]
+    draw_pitch(ax2)
+
+    SHOT_COLORS = {
+        "G": ("#44ff44", "Goal"),
+        "C": ("#ffaa00", "Saved"),
+        "B": ("#4488ff", "Blocked"),
+        "O": ("#ff4444", "Off Target"),
+    }
+
+    SHOT_MARKERS = {
+        "G": "*",
+        "C": "o",
+        "B": "o",
+        "O": "X",
+    }
+
+    shot_patches = []
+    for outcome, (col, label) in SHOT_COLORS.items():
+        sub = mbappe_shots[mbappe_shots["shotOutcome"] == outcome]
+        if sub.empty:
+            continue
+        ax2.scatter(sub["ball_x"], sub["ball_y"],
+                    c=col,
+                    s=300 if outcome == "G" else 150,
+                    marker=SHOT_MARKERS[outcome],
+                    alpha=0.9, zorder=4,
+                    edgecolors="white" if outcome == "G" else "#333",
+                    linewidths=1.5 if outcome == "G" else 0.5)
+        shot_patches.append(mpatches.Patch(color=col,
+                                           label=f"{label} (n={len(sub)})"))
+
+    for _, row in mbappe_shots.iterrows():
+        shot_type  = row["shotType"]  if pd.notna(row["shotType"])  else ""
+        shot_nature = row["shotNature"] if pd.notna(row["shotNature"]) else ""
+        clock      = row["formattedClock"]
+
+        # Map codes to readable labels
+        type_label   = {"V": "Volley", "S": "Standard"}.get(shot_type, shot_type)
+        nature_label = {"P": "Power", "A": "Accurate"}.get(shot_nature, shot_nature)
+
+        label = f"{clock}\n{type_label} | {nature_label}"
+
+        ax2.text(row["ball_x"], row["ball_y"] + 2,
+                 label,
+                 ha="center", fontsize=7, color="white", alpha=0.85,
+                 bbox=dict(facecolor="#1a1a1a", edgecolor="none", alpha=0.5, pad=1))
+
+    ax2.legend(handles=shot_patches, facecolor="#333", labelcolor="white",
+               fontsize=9, loc="upper left", framealpha=0.8)
+    ax2.set_title(f"Mbappé — Shots\n"
+                  f"({len(mbappe_shots)} shots | "
+                  f"{len(mbappe_shots[mbappe_shots['shotOutcome'] == 'G'])} goal)",
+                  color="white", fontsize=12, weight="bold", pad=8)
+
+    ax2.text(0.98, 0.05,
+             f"Volley: {len(mbappe_shots[mbappe_shots['shotType'] == 'V'])}\n"
+             f"Standard: {len(mbappe_shots[mbappe_shots['shotType'] == 'S'])}\n"
+             f"Power: {len(mbappe_shots[mbappe_shots['shotNature'] == 'P'])}\n"
+             f"Accurate: {len(mbappe_shots[mbappe_shots['shotNature'] == 'A'])}",
+             transform=ax2.transAxes, ha="right", va="bottom",
+             color="#cccccc", fontsize=9,
+             bbox=dict(facecolor="#333", edgecolor="#555", alpha=0.8, pad=5))
+
+    fig.suptitle("Mbappé — Passes & Shots — FRA vs AUS (WC MD1 2022)",
+                 color="white", fontsize=14, weight="bold", y=1.01)
+
+    plt.tight_layout()
+    out = f"{OUT_DIR}/mbappe_passes_shots.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+
+
+def plot_mbappe_challenges(df):
+    print("Mbappe challenge map...")
+
+    mbappe_ch_all = df[
+        (df["dribbler"] == "Kylian Mbappé")
+    ].copy()
+
+    outcomes = []
+    for idx in mbappe_ch_all.index:
+        next_idx = idx + 1
+        if next_idx in df.index:
+            next_event = df.loc[next_idx]
+            outcomes.append("won" if next_event["homeTeam"] == True else "lost")
+        else:
+            outcomes.append("unknown")
+
+    mbappe_ch_all["outcome"] = outcomes
+    mbappe_ch_map = mbappe_ch_all[mbappe_ch_all["ball_x"].notna()].copy()
+
+    if mbappe_ch_all.empty:
+        print("  No Mbappe challenge data found.")
+        return
+
+    OUTCOME_COLORS = {
+        "won":     ("#44ff44", "Mbappé Won"),
+        "lost":    ("#ff4444", "Defender Won"),
+        "unknown": ("#888888", "Unknown"),
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(20, 8), facecolor="#1a1a1a")
+
+    # ── Left: pitch map ──
+    ax = axes[0]
+    draw_pitch(ax)
+
+    patches = []
+    for outcome, (col, label) in OUTCOME_COLORS.items():
+        sub = mbappe_ch_map[mbappe_ch_map["outcome"] == outcome]
+        if sub.empty:
+            continue
+        ax.scatter(sub["ball_x"], sub["ball_y"],
+                   c=col, s=120, alpha=0.85, zorder=4,
+                   edgecolors="#333", linewidths=0.5)
+        patches.append(mpatches.Patch(color=col,
+                                      label=f"{label} (n={len(sub)})"))
+
+    for _, row in mbappe_ch_map.iterrows():
+        if pd.notna(row["challenger"]):
+            short = row["challenger"].split()[-1]
+            ax.text(row["ball_x"], row["ball_y"] + 2,
+                    short, ha="center", fontsize=7,
+                    color="white", alpha=0.7)
+
+    total_all  = len(mbappe_ch_all)
+    total_won  = len(mbappe_ch_all[mbappe_ch_all["outcome"] == "won"])
+    total_lost = len(mbappe_ch_all[mbappe_ch_all["outcome"] == "lost"])
+    mapped     = len(mbappe_ch_map)
+
+    ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+              fontsize=9, loc="upper left", framealpha=0.8)
+    ax.set_title(f"Mbappé — Challenge Outcomes by Location\n"
+                 f"(Green = Mbappé won | Red = Defender won | "
+                 f"{total_all - mapped} events missing coords)",
+                 color="white", fontsize=12, weight="bold", pad=8)
+
+    # ── Right: stacked bar by challenger ──
+    ax2 = axes[1]
+    ax2.set_facecolor("#1a1a1a")
+
+    challengers = sorted(mbappe_ch_all["challenger"].dropna().unique())
+    won_counts  = []
+    lost_counts = []
+
+    for c in challengers:
+        sub = mbappe_ch_all[mbappe_ch_all["challenger"] == c]
+        won_counts.append(len(sub[sub["outcome"] == "won"]))
+        lost_counts.append(len(sub[sub["outcome"] == "lost"]))
+
+    y = range(len(challengers))
+    ax2.barh(list(y), won_counts,
+             color="#44ff44", alpha=0.85,
+             edgecolor="#555", linewidth=0.5,
+             label="Mbappé Won")
+    ax2.barh(list(y), lost_counts, left=won_counts,
+             color="#ff4444", alpha=0.85,
+             edgecolor="#555", linewidth=0.5,
+             label="Defender Won")
+
+    ax2.set_yticks(list(y))
+    ax2.set_yticklabels(challengers, color="white", fontsize=9)
+    ax2.set_xlabel("Number of Challenges", color="white", fontsize=10)
+    ax2.set_title("Who Challenged Mbappé?\n(stacked by outcome)",
+                  color="white", fontsize=12, weight="bold", pad=8)
+    ax2.tick_params(colors="white")
+    plt.setp(ax2.get_xticklabels(), color="white")
+    for spine in ax2.spines.values():
+        spine.set_edgecolor("#555")
+    ax2.legend(facecolor="#333", labelcolor="white", fontsize=9)
+
+    ax2.text(0.98, 0.05,
+             f"Total challenges: {total_all}\n"
+             f"Mbappé won: {total_won} ({100*total_won//max(total_all,1)}%)\n"
+             f"Defender won: {total_lost} ({100*total_lost//max(total_all,1)}%)\n"
+             f"Mapped on pitch: {mapped}",
+             transform=ax2.transAxes, ha="right", va="bottom",
+             color="#cccccc", fontsize=9,
+             bbox=dict(facecolor="#333", edgecolor="#555", alpha=0.8, pad=5))
+
+    fig.suptitle("Mbappé — Challenge Analysis — FRA vs AUS (WC MD1 2022)",
+                 color="white", fontsize=14, weight="bold", y=1.01)
+
+    plt.tight_layout()
+    out = f"{OUT_DIR}/mbappe_challenges.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+
+
 
 # ════════════════════════════════════════════════════════════
 # MAIN
@@ -702,11 +953,18 @@ if __name__ == "__main__":
     print("Loading data...")
     df = load_and_flatten(DATA_PATH)
 
+
+
     plot_passing_network(df)
     plot_press_map(df)
     plot_lines_broken(df)
     plot_chance_creation(df)
     plot_player_grades(df)
     plot_mbappe_event_analysis(df)
+    plot_mbappe_challenges(df)
+    plot_mbappe_passes_shots(df)
+
+
+
 
     print(f"\nAll done — files saved to {OUT_DIR}")
