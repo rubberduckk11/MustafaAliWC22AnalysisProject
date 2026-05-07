@@ -3,21 +3,18 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("TkAgg")
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle, Arc
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
 from collections import defaultdict, Counter
-
-# NOTE: there are two JSON files for this game:
-#   - "3834.json"      ~1KB   = metadata (team/stadium info only — NOT this one)
-#   - "3834.json"  ~19MB  = full events file (use THIS one)
-# Rename the events file to "3834_events.json" or point DATA_PATH at it directly.
+ 
 DATA_PATH = r"C:\Users\stafa\Downloads\3834.json"
 OUT_DIR   = r"C:\Users\stafa\Downloads\soccerproject"
-
+ 
 FRANCE_PLAYERS = {
     'Adrien Rabiot', 'Antoine Griezmann', 'Aurélien Tchouaméni',
     'Dayot Upamecano', 'Hugo Lloris', 'Ibrahima Konaté',
@@ -25,16 +22,15 @@ FRANCE_PLAYERS = {
     'Marcus Thuram', 'Olivier Giroud', 'Ousmane Dembele',
     'Raphael Varane', 'Theo Hernandez', 'Youssouf Fofana'
 }
-
-# Denmark jersey numbers -> short label (for FRA vs DEN, WC MD2 2022)
+ 
 DEN_JERSEY_NAMES = {
     "1":  "Schmeichel (GK)",  "2":  "Andersen (RCB)",   "3":  "Nelsson (LCB)",
-    "5":  "Maehle (LWB)",     "6":  "Christensen (MCB)","9":  "Braithwaite (CF)",
-    "10": "Eriksen (CM)",     "12": "Dolberg (CF)",     "13": "Kristensen (RWB)",
-    "14": "Damsgaard (LW)",   "15": "Nörgaard (DM)",    "21": "Cornelius (CF)",
-    "23": "Höjbjerg (CM)",    "25": "Lindström (RW)",   "26": "Bah (RB)",
+    "5":  "Maehle (LWB)",     "6":  "Christensen (MCB)", "9":  "Braithwaite (CF)",
+    "10": "Eriksen (CM)",     "12": "Dolberg (CF)",      "13": "Kristensen (RWB)",
+    "14": "Damsgaard (LW)",   "15": "Nörgaard (DM)",     "21": "Cornelius (CF)",
+    "23": "Höjbjerg (CM)",    "25": "Lindström (RW)",    "26": "Bah (RB)",
 }
-
+ 
 SHORT_NAME = {
     'Theo Hernandez':      'T.Hernandez',
     'Aurélien Tchouaméni': 'Tchouaméni',
@@ -52,39 +48,35 @@ SHORT_NAME = {
     'Youssouf Fofana':     'Fofana',
     'Marcus Thuram':       'Thuram',
 }
-
+ 
 # ════════════════════════════════════════════════════════════
 # 1.  LOAD & FLATTEN
 # ════════════════════════════════════════════════════════════
 def load_and_flatten(path):
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
-
-    # Sanity check: detect if user accidentally pointed at the metadata file
+ 
     if not isinstance(raw, list) or len(raw) == 0 or "gameEvents" not in (raw[0] or {}):
         raise ValueError(
             f"\n\n*** Wrong file at DATA_PATH ***\n"
             f"  {path}\n"
-            f"This file does not contain event records. You probably loaded the\n"
-            f"~1KB metadata file. Use the ~19MB events file instead\n"
-            f"(originally named '3834.json').\n"
+            f"This file does not contain event records.\n"
         )
-
+ 
     rows = []
     for i, r in enumerate(raw):
-        ge      = r.get("gameEvents")       or {}
-        it      = r.get("initialTouch")     or {}
-        pe      = r.get("possessionEvents") or {}
-        fo_raw  = r.get("fouls")            or {}
-        fo      = fo_raw if isinstance(fo_raw, dict) else (fo_raw[0] if fo_raw else {})
-        gr      = r.get("grades")           or {}
-        ball_raw = r.get("ball") or []
-        ball    = ball_raw[0] if isinstance(ball_raw, list) and ball_raw else {}
-
+        ge       = r.get("gameEvents")       or {}
+        it       = r.get("initialTouch")     or {}
+        pe       = r.get("possessionEvents") or {}
+        fo_raw   = r.get("fouls")            or {}
+        fo       = fo_raw if isinstance(fo_raw, dict) else (fo_raw[0] if fo_raw else {})
+        gr       = r.get("grades")           or {}
+        ball_raw = r.get("ball")             or []
+        ball     = ball_raw[0] if isinstance(ball_raw, list) and ball_raw else {}
+ 
         home_players = {str(p["jerseyNum"]): p for p in (r.get("homePlayers") or [])}
         away_players = {str(p["jerseyNum"]): p for p in (r.get("awayPlayers") or [])}
-
-        # Pass end coords: receiver tracking → target tracking → next-event ball
+ 
         end_x = end_y = None
         rec_id  = pe.get("receiverPlayerId")
         targ_id = pe.get("targetPlayerId")
@@ -103,76 +95,83 @@ def load_and_flatten(path):
             nb = raw[i + 1].get("ball") or []
             if nb:
                 end_x, end_y = nb[0].get("x"), nb[0].get("y")
-
+ 
         rows.append({
-            "eventTime":       r.get("eventTime"),
-            "startTime":       r.get("startTime"),
-            "period":          ge.get("period"),
-            "homeTeam":        ge.get("homeTeam"),
-            "teamName":        ge.get("teamName"),
-            "playerName":      ge.get("playerName"),
-            "setpieceType":    ge.get("setpieceType"),
-            "startGameClock":  ge.get("startGameClock"),
-            "formattedClock":  ge.get("startFormattedGameClock"),
-            "initialPressureType": it.get("initialPressureType"),
-            "possEventType":   pe.get("possessionEventType"),
-            "pressureType":    pe.get("pressureType"),
-            "pressurePlayer":  pe.get("pressurePlayerName"),
-            "opportunityType": pe.get("opportunityType"),
-            "linesBroken":     pe.get("linesBrokenType"),
-            "betterOption":    pe.get("betterOptionType"),
-            "createsSpace":    pe.get("createsSpace"),
-            "passer":          pe.get("passerPlayerName"),
-            "passType":        pe.get("passType"),
-            "passOutcome":     pe.get("passOutcomeType"),
-            "target":          pe.get("targetPlayerName"),
-            "receiver":        pe.get("receiverPlayerName"),
-            "accuracyType":    pe.get("accuracyType"),
-            "crossType":       pe.get("crossType"),
-            "crossOutcome":    pe.get("crossOutcomeType"),
-            "shooter":         pe.get("shooterPlayerName"),
-            "shotType":        pe.get("shotType"),
-            "shotNature":      pe.get("shotNatureType"),
-            "shotOutcome":     pe.get("shotOutcomeType"),
-            "challengeType":   pe.get("challengeType"),
-            "challenger":      pe.get("challengerPlayerName"),
-            "carrier":         pe.get("carrierPlayerName"),
-            "dribbler":        pe.get("dribblerPlayerName"),
-            "carryType":       pe.get("carryType"),
-            "carryIntent":     pe.get("carryIntent"),
-            "carrySuccessful": pe.get("carrySuccessful"),
-            "ballCarrier":     pe.get("ballCarrierPlayerName"),
-            "passerGrade":     gr.get("passerGrade"),
-            "receiverGrade":   gr.get("receiverGrade"),
-            "targetGrade":     gr.get("targetGrade"),
-            "shooterGrade":    gr.get("shooterGrade"),
-            "dribbleGrade":    gr.get("dribblerGrade"),
-            "challengerGrade": gr.get("challengerGrade"),
-            "carrierGrade":    gr.get("carrierGrade"),
-            "ballCarrierGrade":gr.get("ballCarrierGrade"),
-            "foulType":        fo.get("foulType"),
-            "offenseType":     fo.get("onFieldOffenseType"),
-            "victim":          fo.get("victimPlayerName"),
-            "ball_x":          ball.get("x"),
-            "ball_y":          ball.get("y"),
-            "end_x":           end_x,
-            "end_y":           end_y,
-            "_home_players":   home_players,
-            "_away_players":   away_players,
+            "eventTime":            r.get("eventTime"),
+            "startTime":            r.get("startTime"),
+            "period":               ge.get("period"),
+            "homeTeam":             ge.get("homeTeam"),
+            "teamName":             ge.get("teamName"),
+            "playerName":           ge.get("playerName"),
+            "setpieceType":         ge.get("setpieceType"),
+            "startGameClock":       ge.get("startGameClock"),
+            "formattedClock":       ge.get("startFormattedGameClock"),
+            "initialPressureType":  it.get("initialPressureType"),
+            "possEventType":        pe.get("possessionEventType"),
+            "pressureType":         pe.get("pressureType"),
+            "pressurePlayer":       pe.get("pressurePlayerName"),
+            "opportunityType":      pe.get("opportunityType"),
+            "linesBroken":          pe.get("linesBrokenType"),
+            "betterOption":         pe.get("betterOptionType"),
+            "createsSpace":         pe.get("createsSpace"),
+            "passer":               pe.get("passerPlayerName"),
+            "passType":             pe.get("passType"),
+            "passOutcome":          pe.get("passOutcomeType"),
+            "target":               pe.get("targetPlayerName"),
+            "receiver":             pe.get("receiverPlayerName"),
+            "accuracyType":         pe.get("accuracyType"),
+            "crossType":            pe.get("crossType"),
+            "crossOutcome":         pe.get("crossOutcomeType"),
+            "shooter":              pe.get("shooterPlayerName"),
+            "shotType":             pe.get("shotType"),
+            "shotNature":           pe.get("shotNatureType"),
+            "shotOutcome":          pe.get("shotOutcomeType"),
+            "challengeType":        pe.get("challengeType"),
+            "challenger":           pe.get("challengerPlayerName"),
+            "challengeWinner":      pe.get("challengeWinnerPlayerName"),
+            "carrier":              pe.get("carrierPlayerName"),
+            "dribbler":             pe.get("dribblerPlayerName"),
+            "carryType":            pe.get("carryType"),
+            "carryIntent":          pe.get("carryIntent"),
+            "carrySuccessful":      pe.get("carrySuccessful"),
+            "ballCarrier":          pe.get("ballCarrierPlayerName"),
+            "shotInitialHeight":    pe.get("shotInitialHeightType"),
+            "bodyType":             pe.get("bodyType"),
+            "passerGrade":          gr.get("passerGrade"),
+            "receiverGrade":        gr.get("receiverGrade"),
+            "targetGrade":          gr.get("targetGrade"),
+            "shooterGrade":         gr.get("shooterGrade"),
+            "dribbleGrade":         gr.get("dribblerGrade"),
+            "challengerGrade":      gr.get("challengerGrade"),
+            "carrierGrade":         gr.get("carrierGrade"),
+            "ballCarrierGrade":     gr.get("ballCarrierGrade"),
+            "foulType":             fo.get("foulType"),
+            "offenseType":          fo.get("onFieldOffenseType"),
+            "victim":               fo.get("victimPlayerName"),
+            "ball_x":               ball.get("x"),
+            "ball_y":               ball.get("y"),
+            "end_x":                end_x,
+            "end_y":                end_y,
+            "_home_players":        home_players,
+            "_away_players":        away_players,
         })
-
+ 
     df = pd.DataFrame(rows)
-    # Normalise: flip period 2 so France always attacks right (+x)
-    mask = df["period"] == 2
+ 
+    # Flip period 2 so France always attacks right (+x)
+    mask = df["period"] == "2"
+    if mask.sum() == 0:
+        mask = df["period"] == 2
     df.loc[mask, "ball_x"] *= -1
     df.loc[mask, "ball_y"] *= -1
     df.loc[mask, "end_x"]  *= -1
     df.loc[mask, "end_y"]  *= -1
-    print(f"Loaded {len(df)} events")
+ 
+    print(f"Loaded {len(df)} events  |  Period 2 rows flipped: {mask.sum()}")
     return df
-
+ 
 # ════════════════════════════════════════════════════════════
-# 2.  PITCH DRAWING HELPER
+# 2.  PITCH DRAWING HELPERS
 # ════════════════════════════════════════════════════════════
 def draw_pitch(ax, length=105, width=68, line_color="white",
                bg="#2d5c2d", lw=1.5, attack_label="France attack →"):
@@ -181,13 +180,13 @@ def draw_pitch(ax, length=105, width=68, line_color="white",
     ax.set_ylim(-width/2 - 3, width/2 + 3)
     ax.set_aspect("equal")
     ax.axis("off")
-
+ 
     kw = dict(edgecolor=line_color, fill=False, linewidth=lw)
     ax.add_patch(Rectangle((-length/2, -width/2), length, width, **kw))
     ax.plot([0, 0], [-width/2, width/2], color=line_color, lw=lw)
     ax.add_patch(plt.Circle((0, 0), 9.15, **kw))
     ax.plot(0, 0, "o", color=line_color, ms=2)
-
+ 
     for side in [-1, 1]:
         xp = side * length / 2
         ax.add_patch(Rectangle((xp - side*16.5, -20.15), side*16.5, 40.3, **kw))
@@ -197,17 +196,17 @@ def draw_pitch(ax, length=105, width=68, line_color="white",
         ax.add_patch(Arc((xp - side*11, 0), 18.3, 18.3,
                          theta1=t1, theta2=t2, color=line_color, lw=lw))
         ax.plot([xp, xp], [-3.66, 3.66], color=line_color, lw=3)
-
+ 
     ax.annotate("", xy=(length/2 - 2, -width/2 + 2),
                 xytext=(length/2 - 10, -width/2 + 2),
                 arrowprops=dict(arrowstyle="->", color=line_color, lw=1, alpha=0.5))
     ax.text(length/2 - 6, -width/2 + 4, attack_label,
             color=line_color, fontsize=7, alpha=0.5, ha="center")
-
+ 
 def add_third_lines(ax):
     for x in [-17.5, 17.5]:
         ax.axvline(x, color="white", lw=0.8, alpha=0.35, ls="--", zorder=1)
-
+ 
 def add_third_counts(ax, xs, width=68):
     d = sum(1 for x in xs if x < -17.5)
     m = sum(1 for x in xs if -17.5 <= x <= 17.5)
@@ -218,7 +217,7 @@ def add_third_counts(ax, xs, width=68):
                 f"{label}\n{count} ({100*count//total}%)",
                 ha="center", va="top", color="white", fontsize=8,
                 bbox=dict(facecolor="#222", edgecolor="none", alpha=0.7, pad=2))
-
+ 
 # ════════════════════════════════════════════════════════════
 # 3.  PASSING NETWORK
 # ════════════════════════════════════════════════════════════
@@ -230,11 +229,11 @@ def plot_passing_network(df):
         df["passer"].notna() &
         df["ball_x"].notna()
     ].copy()
-
+ 
     node_pos = (france_passes.groupby("passer")[["ball_x", "ball_y"]]
                 .mean()
                 .rename(columns={"ball_x": "x", "ball_y": "y"}))
-
+ 
     completed    = france_passes[france_passes["passOutcome"] == "C"]
     edge_counts  = defaultdict(int)
     all_attempts = defaultdict(int)
@@ -244,13 +243,13 @@ def plot_passing_network(df):
     for _, row in france_passes.iterrows():
         if pd.notna(row["target"]):
             all_attempts[(row["passer"], row["target"])] += 1
-
+ 
     fig = plt.figure(figsize=(20, 9), facecolor="#1a1a1a")
     gs  = fig.add_gridspec(1, 2, width_ratios=[3, 1], wspace=0.05)
     ax  = fig.add_subplot(gs[0, 0])
     ax_table = fig.add_subplot(gs[0, 1])
     draw_pitch(ax)
-
+ 
     max_edge = max(edge_counts.values(), default=1)
     for (passer, receiver), count in edge_counts.items():
         if count < 2:
@@ -265,7 +264,7 @@ def plot_passing_network(df):
         ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
                     arrowprops=dict(arrowstyle="-|>", color=col,
                                    lw=lw, mutation_scale=14, alpha=0.85))
-
+ 
     pass_counts = france_passes.groupby("passer").size()
     for player, (px, py) in node_pos.iterrows():
         n    = pass_counts.get(player, 1)
@@ -275,64 +274,50 @@ def plot_passing_network(df):
         label = SHORT_NAME.get(player, player.split()[-1])
         ax.text(px, py + 3, label, ha="center", va="bottom",
                 fontsize=8, color="white", weight="bold", zorder=6)
-
+ 
     sm = ScalarMappable(cmap="RdYlGn", norm=Normalize(0, 1))
     sm.set_array([])
     cb = fig.colorbar(sm, ax=ax, fraction=0.022, pad=0.02)
     cb.set_label("Pass completion rate", color="white", fontsize=9)
     plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
     cb.ax.yaxis.set_tick_params(color="white")
-
+ 
     ax.set_title("France Passing Network — FRA vs DEN (WC MD2 2022)",
                  color="white", fontsize=13, weight="bold", pad=10)
     ax.text(0, -37,
             "Nodes = avg passing position  |  Size = pass volume  |  "
             "Arrow width = frequency  |  Colour = completion%",
             ha="center", color="#aaaaaa", fontsize=7.5)
-
-    # ── Right panel: top pass combinations table ──
+ 
     ax_table.set_facecolor("#1a1a1a")
     ax_table.axis("off")
-
-    # Build a list: (passer, receiver, completed, attempted)
+ 
     pair_keys = set(edge_counts.keys()) | set(all_attempts.keys())
     rows_table = []
     for (p, r) in pair_keys:
         comp = edge_counts.get((p, r), 0)
-        att  = all_attempts.get((p, r), comp)  # attempts ≥ completed
+        att  = all_attempts.get((p, r), comp)
         if att < 2:
             continue
         rows_table.append((p, r, comp, att))
     rows_table.sort(key=lambda t: (-t[2], -t[3]))
-    top_n = 20
-    rows_table = rows_table[:top_n]
-
-    ax_table.text(0.5, 0.985,
-                  f"Top {len(rows_table)} pass combinations",
-                  transform=ax_table.transAxes,
-                  ha="center", va="top",
+    rows_table = rows_table[:20]
+ 
+    ax_table.text(0.5, 0.985, f"Top {len(rows_table)} pass combinations",
+                  transform=ax_table.transAxes, ha="center", va="top",
                   color="white", fontsize=12, weight="bold")
-    # Header
-    ax_table.text(0.02, 0.945, "From → To",
-                  transform=ax_table.transAxes,
-                  ha="left", va="top", color="#aaaaaa",
-                  fontsize=9, weight="bold")
-    ax_table.text(0.78, 0.945, "Comp / Att",
-                  transform=ax_table.transAxes,
-                  ha="right", va="top", color="#aaaaaa",
-                  fontsize=9, weight="bold")
-    ax_table.text(0.99, 0.945, "%",
-                  transform=ax_table.transAxes,
-                  ha="right", va="top", color="#aaaaaa",
-                  fontsize=9, weight="bold")
+    ax_table.text(0.02, 0.945, "From → To", transform=ax_table.transAxes,
+                  ha="left", va="top", color="#aaaaaa", fontsize=9, weight="bold")
+    ax_table.text(0.78, 0.945, "Comp / Att", transform=ax_table.transAxes,
+                  ha="right", va="top", color="#aaaaaa", fontsize=9, weight="bold")
+    ax_table.text(0.99, 0.945, "%", transform=ax_table.transAxes,
+                  ha="right", va="top", color="#aaaaaa", fontsize=9, weight="bold")
     ax_table.plot([0.02, 0.99], [0.93, 0.93],
                   transform=ax_table.transAxes, color="#555", lw=0.8)
-
+ 
     if rows_table:
-        y_top    = 0.91
-        y_bottom = 0.02
-        n        = len(rows_table)
-        step     = (y_top - y_bottom) / max(n, 1)
+        y_top, y_bottom = 0.91, 0.02
+        step = (y_top - y_bottom) / max(len(rows_table), 1)
         for idx, (p, r, comp, att) in enumerate(rows_table):
             y = y_top - idx * step
             pct = 100 * comp / max(att, 1)
@@ -347,36 +332,36 @@ def plot_passing_network(df):
                           ha="right", va="top", color="white", fontsize=8.5)
             ax_table.text(0.99, y, f"{pct:.0f}",
                           transform=ax_table.transAxes,
-                          ha="right", va="top", color=row_color, fontsize=8.5,
-                          weight="bold")
-
+                          ha="right", va="top", color=row_color,
+                          fontsize=8.5, weight="bold")
+ 
     out = f"{OUT_DIR}/passing_network_france.png"
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
     plt.close()
     print(f"  -> {out}")
-
+ 
 # ════════════════════════════════════════════════════════════
 # 4.  PRESS MAP
 # ════════════════════════════════════════════════════════════
 def plot_press_map(df):
     print("[2/6] Press map...")
-
+ 
     den_press = df[
         (df["homeTeam"] == True) &
         (df["pressureType"].isin(["P", "A"])) &
         df["ball_x"].notna()
     ].copy()
     den_full = den_press[den_press["pressureType"] == "P"]
-
+ 
     fra_press = df[
         (df["homeTeam"] == False) &
         (df["pressureType"].isin(["P", "A"])) &
         df["ball_x"].notna()
     ].copy()
     fra_full = fra_press[fra_press["pressureType"] == "P"]
-
+ 
     fig, axes = plt.subplots(1, 2, figsize=(20, 8), facecolor="#1a1a1a")
-
+ 
     datasets = [
         (axes[0], den_press, den_full,
          "DEN Pressure on France\n(France in possession | France attacks →)",
@@ -385,7 +370,7 @@ def plot_press_map(df):
          "France Pressure on DEN\n(DEN in possession | France attacks →)",
          "Where France pressed Denmark  (DEN half = negative x)"),
     ]
-
+ 
     for ax, data, full_data, title, subtitle in datasets:
         draw_pitch(ax)
         add_third_lines(ax)
@@ -400,24 +385,24 @@ def plot_press_map(df):
         ax.legend(facecolor="#333", labelcolor="white", fontsize=8, loc="upper left")
         ax.set_title(title, color="white", fontsize=11, weight="bold", pad=6)
         ax.text(0, 38, subtitle, ha="center", color="#aaaaaa", fontsize=8)
-
+ 
     sm = ScalarMappable(cmap="hot")
     sm.set_array([])
     cb = fig.colorbar(sm, ax=axes, fraction=0.015, pad=0.02)
     cb.set_label("Pressure density", color="white", fontsize=9)
     plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
     cb.ax.yaxis.set_tick_params(color="white")
-
+ 
     fig.suptitle(
         "Pressure Maps — FRA vs DEN (WC MD2 2022)\n"
         "Both maps: France attacks →    |    DEN possession = ball at negative x",
         color="white", fontsize=13, weight="bold", y=1.02)
-
+ 
     out = f"{OUT_DIR}/press_map.png"
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
     plt.close()
     print(f"  -> {out}")
-
+ 
 # ════════════════════════════════════════════════════════════
 # 5.  LINES BROKEN
 # ════════════════════════════════════════════════════════════
@@ -430,31 +415,31 @@ LINE_COLORS = {
     "AD":  ("#ff00ff", "Attack + Defense (bypasses mid)"),
     "AMD": ("#ffffff", "All three lines"),
 }
-
+ 
 def plot_lines_broken(df):
     print("[3/6] Lines broken...")
-
+ 
     france_lb = df[
         (df["homeTeam"] == True) &
         df["linesBroken"].notna() &
         df["ball_x"].notna()
     ].copy()
-
-    # Copy first, then flip so Denmark attacks right on their map
+ 
     den_lb = df[
         (df["homeTeam"] == False) &
         df["linesBroken"].notna() &
         df["ball_x"].notna()
     ].copy()
+    den_lb = den_lb.copy()
     den_lb["ball_x"] = -den_lb["ball_x"]
     den_lb["ball_y"] = -den_lb["ball_y"]
     den_lb["end_x"]  = -den_lb["end_x"]
     den_lb["end_y"]  = -den_lb["end_y"]
-
+ 
     fig, axes = plt.subplots(1, 2, figsize=(18, 7), facecolor="#1a1a1a")
-
+ 
     for ax, data, title, arrow in [
-        (axes[0], france_lb, "France Line-Breaking Events",   "France attack →"),
+        (axes[0], france_lb, "France Line-Breaking Events",  "France attack →"),
         (axes[1], den_lb,    "Denmark Line-Breaking Events", "Denmark attack →"),
     ]:
         draw_pitch(ax, attack_label=arrow)
@@ -463,140 +448,423 @@ def plot_lines_broken(df):
             sub = data[data["linesBroken"] == ltype]
             if sub.empty:
                 continue
-
-            # Draw arrow from origin -> end for each pass
             for _, row in sub.iterrows():
                 x1, y1 = row["ball_x"], row["ball_y"]
                 x2, y2 = row["end_x"],  row["end_y"]
                 if pd.isna(x2) or pd.isna(y2):
-                    # No end coords — just plot the origin dot
                     ax.scatter(x1, y1, c=col, s=70, alpha=0.85, zorder=4,
                                edgecolors="#333", linewidths=0.5)
                     continue
-                # Origin marker
                 ax.scatter(x1, y1, c=col, s=35, alpha=0.9, zorder=5,
                            edgecolors="#222", linewidths=0.4)
-                # Arrow shaft
-                ax.annotate(
-                    "", xy=(x2, y2), xytext=(x1, y1),
-                    arrowprops=dict(arrowstyle="-|>", color=col,
-                                    lw=1.4, mutation_scale=10, alpha=0.75),
-                    zorder=4,
-                )
-
-            patches.append(mpatches.Patch(color=col,
-                                          label=f"{label} (n={len(sub)})"))
-
+                ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                            arrowprops=dict(arrowstyle="-|>", color=col,
+                                           lw=1.4, mutation_scale=10, alpha=0.75),
+                            zorder=4)
+            patches.append(mpatches.Patch(color=col, label=f"{label} (n={len(sub)})"))
+ 
         ax.legend(handles=patches, facecolor="#333", labelcolor="white",
                   fontsize=8, loc="upper left", framealpha=0.8)
         ax.set_title(title, color="white", fontsize=12, weight="bold", pad=8)
-
-    fig.suptitle(
-        "Line-Breaking Passes — FRA vs DEN (WC MD2 2022)\n"
-        "Dot = pass origin   |   Arrow tip = receiver/target location",
-        color="white", fontsize=14, weight="bold", y=1.02)
-
+ 
+    fig.suptitle("Line-Breaking Events — FRA vs DEN (WC MD2 2022)",
+                 color="white", fontsize=14, weight="bold", y=1.02)
+ 
     out = f"{OUT_DIR}/lines_broken.png"
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
     plt.close()
     print(f"  -> {out}")
-
+ 
 # ════════════════════════════════════════════════════════════
 # 6.  CHANCE CREATION MAP
 # ════════════════════════════════════════════════════════════
-OPP_INFO = {
-    "C": ("#ff0000", "Chance Created (should score)"),
-    "H": ("#ff8800", "Half Chance"),
-    "D": ("#ffff00", "Dangerous Position"),
-    "N": ("#4488ff", "Neg Chance (vs France)"),
-    "P": ("#00aaff", "Neg Dangerous (vs France)"),
-}
-
 def plot_chance_creation(df):
     print("[4/6] Chance creation map...")
-
-    opps = df[
-        df["opportunityType"].notna() &
+ 
+    # After load_and_flatten: France always attacks right (+x), Denmark left (-x).
+    # Fra positive opps: homeTeam==True, ball must be on France's attacking side (>= 0)
+    # Den positive opps: homeTeam==False, ball AND end must be on Denmark's attacking side (<= 0)
+    # Fra negative opps: homeTeam==False (Denmark in possession), no extra coord filter needed
+    # Den negative opps: homeTeam==True (France in possession), ball must be on France's side (>= 0)
+ 
+    fra_pos = df[
+        df["opportunityType"].isin(["C", "H", "D"]) &
+        (df["homeTeam"] == True) &
         df["ball_x"].notna() &
-        ((df["homeTeam"] == True) | df["opportunityType"].isin(["N", "P"]))
+        (df["ball_x"] >= 0)
     ].copy()
-
+ 
+    den_pos = df[
+        df["opportunityType"].isin(["C", "H", "D"]) &
+        (df["homeTeam"] == False) &
+        df["ball_x"].notna() &
+        (df["ball_x"] <= 0)
+    ].copy()
+    den_pos = den_pos[
+        den_pos["end_x"].isna() | (den_pos["end_x"] <= 0)
+    ].copy()
+ 
+    fra_neg = df[
+        df["opportunityType"].isin(["N", "P"]) &
+        (df["homeTeam"] == False) &
+        df["ball_x"].notna()
+    ].copy()
+ 
+    den_neg = df[
+        df["opportunityType"].isin(["N", "P"]) &
+        (df["homeTeam"] == True) &
+        df["ball_x"].notna() &
+        (df["ball_x"] >= 0)
+    ].copy()
+    den_neg = den_neg[
+    den_neg["end_x"].isna() | (den_neg["end_x"] <= 0)
+    ].copy()
+ 
     goals = df[df["shotOutcome"] == "G"].copy()
-
-    suspicious = opps[
-        (opps["opportunityType"] == "C") &
-        (opps["ball_x"] < 0)
-    ]
-    print(suspicious[["playerName", "passer", "ball_x", "ball_y",
-                      "period", "formattedClock", "possEventType"]])
-
-    suspicious_all = opps[
-        (opps["opportunityType"].isin(["C", "H", "D"])) &
-        (opps["ball_x"] < 0)
-    ]
-    print(suspicious_all[["playerName", "passer", "homeTeam", "ball_x", "ball_y",
-                          "period", "formattedClock", "opportunityType"]])
-
-    fig, ax = plt.subplots(figsize=(14, 9), facecolor="#1a1a1a")
+ 
+    counts = {
+        "FRA_C": len(fra_pos[fra_pos["opportunityType"] == "C"]),
+        "FRA_H": len(fra_pos[fra_pos["opportunityType"] == "H"]),
+        "FRA_D": len(fra_pos[fra_pos["opportunityType"] == "D"]),
+        "DEN_C": len(den_pos[den_pos["opportunityType"] == "C"]),
+        "DEN_H": len(den_pos[den_pos["opportunityType"] == "H"]),
+        "DEN_D": len(den_pos[den_pos["opportunityType"] == "D"]),
+    }
+    fra_neg_p = len(fra_neg[fra_neg["opportunityType"] == "P"])
+    fra_neg_n = len(fra_neg[fra_neg["opportunityType"] == "N"])
+    den_neg_n = len(den_neg[den_neg["opportunityType"] == "N"])
+    den_neg_p = len(den_neg[den_neg["opportunityType"] == "P"])
+ 
+    print(f"  France opportunities  — C:{counts['FRA_C']}  H:{counts['FRA_H']}  D:{counts['FRA_D']}")
+    print(f"  Denmark opportunities — C:{counts['DEN_C']}  H:{counts['DEN_H']}  D:{counts['DEN_D']}")
+    print(f"  Neg → France benefit  N:{fra_neg_n}  P:{fra_neg_p}")
+    print(f"  Neg → Denmark benefit N:{den_neg_n}  P:{den_neg_p}")
+ 
+    fig, ax = plt.subplots(figsize=(18, 11), facecolor="#1a1a1a")
     draw_pitch(ax)
-
-    neg_opps = opps[opps["opportunityType"].isin(["N", "P"])]
-    print(neg_opps[["opportunityType", "ball_x", "ball_y", "period", "formattedClock"]])
-
     patches = []
-    for otype, (col, label) in OPP_INFO.items():
-        sub = opps[opps["opportunityType"] == otype]
+ 
+    EVENT_LINESTYLE = {"PA": "-", "CR": "--", "CH": ":", "CL": "-."}
+    OPP_END_SIZE    = {"C": 300, "H": 150, "D": 80}
+    OPP_END_MARKER  = {"C": "*", "H": "o", "D": "o"}
+ 
+    def draw_opportunity_arrows(sub, col, alpha_arrow=0.6, alpha_dot=0.9):
+        for _, row in sub.iterrows():
+            x1, y1 = row["ball_x"], row["ball_y"]
+            x2 = row["end_x"] if pd.notna(row.get("end_x")) else x1
+            y2 = row["end_y"] if pd.notna(row.get("end_y")) else y1
+            evt = row.get("possEventType") or "PA"
+            opp = row["opportunityType"]
+            ls  = EVENT_LINESTYLE.get(evt, "-")
+ 
+            ax.annotate("",
+                xy=(x2, y2), xytext=(x1, y1),
+                arrowprops=dict(
+                    arrowstyle="-|>", color=col, lw=1.3,
+                    linestyle=ls, mutation_scale=10, alpha=alpha_arrow,
+                ),
+                zorder=4)
+            ax.scatter(x1, y1, c=col, s=20, alpha=0.45, zorder=5, edgecolors="none")
+            ax.scatter(x2, y2, c=col,
+                       s=OPP_END_SIZE.get(opp, 80),
+                       marker=OPP_END_MARKER.get(opp, "o"),
+                       alpha=alpha_dot, zorder=6,
+                       edgecolors="white" if opp == "C" else "none",
+                       linewidths=1.2 if opp == "C" else 0)
+ 
+    # France-benefiting positives
+    for otype, key, col in [
+        ("C", "FRA_C", "#ff3333"),
+        ("H", "FRA_H", "#ff8800"),
+        ("D", "FRA_D", "#ffff00"),
+    ]:
+        sub = fra_pos[fra_pos["opportunityType"] == otype]
         if sub.empty:
             continue
-        xs = sub["ball_x"].copy()
-        ys = sub["ball_y"].copy()
-        if otype in ["N", "P"]:
-            # Only plot events genuinely in France's defensive half
-            mask = xs < 0
-            xs = xs[mask]
-            ys = ys[mask]
-        ax.scatter(xs, ys, c=col,
-                   s=200 if otype == "C" else 100,
-                   marker="*" if otype == "C" else "o",
-                   alpha=0.9, zorder=5,
-                   edgecolors="white" if otype == "C" else "none",
-                   linewidths=1)
-        patches.append(mpatches.Patch(color=col,
-                                      label=f"{label} (n={len(sub)})"))
-
+        draw_opportunity_arrows(sub, col)
+        lbl = {"C": "Chance Created", "H": "Half Chance", "D": "Dangerous"}[otype]
+        patches.append(mpatches.Patch(color=col, label=f"FRA {lbl} (n={counts[key]})"))
+ 
+    # France-benefiting negatives
+    for otype, col, lbl in [
+        ("N", "#ff3333", f"FRA Neg Chance via DEN error (n={fra_neg_n})"),
+        ("P", "#ff8800", f"FRA Neg Dangerous via DEN error (n={fra_neg_p})"),
+    ]:
+        sub = fra_neg[fra_neg["opportunityType"] == otype]
+        if sub.empty:
+            continue
+        draw_opportunity_arrows(sub, col, alpha_arrow=0.35, alpha_dot=0.55)
+        patches.append(mpatches.Patch(color=col, label=lbl))
+ 
+    # Denmark-benefiting positives
+    for otype, key, col in [
+        ("C", "DEN_C", "#cc00cc"),
+        ("H", "DEN_H", "#9933ff"),
+        ("D", "DEN_D", "#4488ff"),
+    ]:
+        sub = den_pos[den_pos["opportunityType"] == otype]
+        if sub.empty:
+            continue
+        draw_opportunity_arrows(sub, col)
+        lbl = {"C": "Chance Created", "H": "Half Chance", "D": "Dangerous"}[otype]
+        patches.append(mpatches.Patch(color=col, label=f"DEN {lbl} (n={counts[key]})"))
+ 
+    # Denmark-benefiting negatives
+    for otype, col, lbl in [
+        ("N", "#cc00cc", f"DEN Neg Chance via FRA error (n={den_neg_n})"),
+        ("P", "#9933ff", f"DEN Neg Dangerous via FRA error (n={den_neg_p})"),
+    ]:
+        sub = den_neg[den_neg["opportunityType"] == otype]
+        if sub.empty:
+            continue
+        draw_opportunity_arrows(sub, col, alpha_arrow=0.35, alpha_dot=0.55)
+        patches.append(mpatches.Patch(color=col, label=lbl))
+ 
+    # Goals
     for _, g in goals.iterrows():
         is_france = g["homeTeam"]
-        gx, gy   = g["ball_x"], g["ball_y"]
+        gx, gy = g["ball_x"], g["ball_y"]
         ax.scatter(gx, gy,
                    c="#00ff00" if is_france else "#ff4444",
-                   s=450, marker="*", zorder=6,
+                   s=500, marker="*", zorder=8,
                    edgecolors="white", linewidths=1.5)
-        name = SHORT_NAME.get(g["shooter"],
-                              (g["shooter"] or "").split()[-1])
+        name = SHORT_NAME.get(g["shooter"], (g["shooter"] or "").split()[-1])
         ax.text(gx, gy + 3.5, f"GOAL: {name}",
                 ha="center", fontsize=8, color="white",
-                weight="bold", zorder=7)
-
+                weight="bold", zorder=9)
+ 
     patches += [
         mpatches.Patch(color="#00ff00", label="France Goal"),
-        mpatches.Patch(color="#ff4444", label="DEN Goal"),
+        mpatches.Patch(color="#ff4444", label="Denmark Goal"),
     ]
-    ax.legend(handles=patches, facecolor="#333", labelcolor="white",
-              fontsize=9, loc="upper left", framealpha=0.85)
-    ax.set_title("Chance Creation & Goal Map — FRA vs DEN (WC MD2 2022)",
-                 color="white", fontsize=13, weight="bold", pad=10)
-
+ 
+    style_legend = [
+        Line2D([0], [0], color="white", lw=1.5, linestyle="-",  label="Pass"),
+        Line2D([0], [0], color="white", lw=1.5, linestyle="--", label="Cross"),
+        Line2D([0], [0], color="white", lw=1.5, linestyle=":",  label="Dribble"),
+        Line2D([0], [0], color="white", lw=1.5, linestyle="-.", label="Clearance"),
+        Line2D([0], [0], color="white", lw=0, marker="*",
+               markersize=10, label="★ = Chance Created"),
+        Line2D([0], [0], color="white", lw=0, marker="o",
+               markersize=6,  label="● = Half Chance / Dangerous"),
+        Line2D([0], [0], color="white", lw=0, marker="o",
+               markersize=3,  label="· = Origin of event"),
+    ]
+ 
+    leg1 = ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+                     fontsize=8, loc="upper left", framealpha=0.85, ncol=2,
+                     title="Team & Opportunity Level", title_fontsize=8)
+    leg1.get_title().set_color("white")
+    ax.add_artist(leg1)
+ 
+    leg2 = ax.legend(handles=style_legend, facecolor="#333", labelcolor="white",
+                     fontsize=8, loc="lower left", framealpha=0.85,
+                     title="Event Type & Marker", title_fontsize=8)
+    leg2.get_title().set_color("white")
+ 
+    ax.set_title(
+        "Chance Creation & Goal Map — FRA vs DEN (WC MD2 2022)\n"
+        "France attacks →   |   Warm colours = France benefit   |   "
+        "Cool colours = Denmark benefit   |   Arrow: passer → receiver",
+        color="white", fontsize=12, weight="bold", pad=10)
+ 
     out = f"{OUT_DIR}/chance_creation_map.png"
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
     plt.close()
     print(f"  -> {out}")
 
+
+# TEAM SHOTS
+def plot_shot_map(df):
+    print("Shot map...")
+ 
+    shots = df[
+        (df["possEventType"] == "SH") &
+        df["shooter"].notna()
+    ].copy()
+ 
+    fra = shots[shots["homeTeam"] == True].copy()
+    den = shots[shots["homeTeam"] == False].copy()
+    den["ball_x"] = -den["ball_x"]
+    den["ball_y"] = -den["ball_y"]
+ 
+    SHOT_TYPE = {
+        "S": "Side Foot", "V": "Volley",  "F": "Side Foot",
+        "B": "Bicycle",   "D": "Div.Hdr", "I": "Sliding",
+        "L": "Lob",       "O": "Out.Foot",
+    }
+    SHOT_NATURE = {"P": "Power", "A": "Accurate", "F": "Flick", "T": "Toe Punt"}
+    BODY_TYPE   = {
+        "R": "RF", "L": "LF", "HE": "Head",
+        "RT": "R.Thigh", "LT": "L.Thigh",
+        "LC": "L.Shld",  "RC": "R.Shld",
+    }
+    PRESSURE_LABEL = {"P": "Pressed", "A": "Press Att.", "L": "Lane", "N": "Free"}
+    HEIGHT_LABEL   = {
+        "BOTTOMTHIRD": "Low", "MIDDLETHIRD": "Mid", "TOPTHIRD": "High",
+        "G": "Ground", "N": "Over(narrow)", "O": "Over", "C": "Bar",
+    }
+ 
+    def outcome_group(o):
+        if o == "G":            return "goal"
+        if o in ("S", "F"):     return "on_target"
+        if o == "B":            return "blocked"
+        return "off_target"
+ 
+    OUTCOME_STYLE = {
+        "goal":       ("#00ee44", "*",  500, "Goal",           2.0),
+        "on_target":  ("#44aaff", "o",  220, "On Target",      1.2),
+        "blocked":    ("#ffaa00", "D",  180, "Blocked",        1.0),
+        "off_target": ("#ff4444", "X",  180, "Off Target",     0.8),
+    }
+ 
+    # ── Attacking-half pitch draw ─────────────────────────────────────────────
+    def draw_attacking_half(ax, length=105, width=68, lc="white", bg="#1e1e1e", lw=1.5):
+        ax.set_facecolor(bg)
+        # Show from centre to goal + a little beyond
+        ax.set_xlim(0, length/2 + 4)
+        ax.set_ylim(-width/2 - 3, width/2 + 3)
+        ax.set_aspect("equal")
+        ax.axis("off")
+ 
+        kw = dict(edgecolor=lc, fill=False, linewidth=lw)
+        # Half pitch boundary
+        ax.plot([0, 0],           [-width/2, width/2], color=lc, lw=lw)
+        ax.plot([0, length/2],    [ width/2,  width/2], color=lc, lw=lw)
+        ax.plot([0, length/2],    [-width/2, -width/2], color=lc, lw=lw)
+        ax.plot([length/2, length/2], [-width/2, -3.66], color=lc, lw=lw)
+        ax.plot([length/2, length/2], [ 3.66,  width/2], color=lc, lw=lw)
+ 
+        # Centre circle (half)
+        import numpy as np
+        theta = np.linspace(-np.pi/2, np.pi/2, 100)
+        ax.plot(9.15*np.cos(theta), 9.15*np.sin(theta), color=lc, lw=lw)
+        ax.plot(0, 0, "o", color=lc, ms=2)
+ 
+        # Penalty area
+        ax.add_patch(Rectangle((length/2 - 16.5, -20.15), 16.5, 40.3, **kw))
+        # Six-yard box
+        ax.add_patch(Rectangle((length/2 - 5.5, -9.15), 5.5, 18.3, **kw))
+        # Penalty spot
+        ax.plot(length/2 - 11, 0, "o", color=lc, ms=2)
+        # Penalty arc
+        ax.add_patch(Arc((length/2 - 11, 0), 18.3, 18.3,
+                         theta1=127, theta2=233, color=lc, lw=lw))
+        # Goal
+        ax.plot([length/2, length/2], [-3.66, 3.66], color=lc, lw=4)
+ 
+        # Attack direction arrow
+        ax.annotate("", xy=(length/2 - 1, -width/2 + 2),
+                    xytext=(length/2 - 8, -width/2 + 2),
+                    arrowprops=dict(arrowstyle="->", color=lc, lw=1, alpha=0.4))
+        ax.text(length/2 - 4.5, -width/2 + 3.8, "attack →",
+                color=lc, fontsize=7, alpha=0.4, ha="center")
+ 
+    # ── Figure ────────────────────────────────────────────────────────────────
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9), facecolor="#1a1a1a")
+ 
+    for ax, team_df, team_label in [
+        (axes[0], fra, "France"),
+        (axes[1], den, "Opponent"),
+    ]:
+        draw_attacking_half(ax)
+ 
+        for _, row in team_df.iterrows():
+            bx = row["ball_x"]
+            by = row["ball_y"]
+            if pd.isna(bx) or pd.isna(by):
+                continue
+ 
+            grp = outcome_group(row["shotOutcome"])
+            col, marker, size, label, lw = OUTCOME_STYLE[grp]
+ 
+            ax.scatter(bx, by, c=col, s=size, marker=marker,
+                       zorder=6, alpha=0.93,
+                       edgecolors="white", linewidths=lw)
+ 
+        # ── Clean table of shots below pitch ─────────────────────────────────
+        # Build rows: clock | player | body | type | nature | height | pressure | outcome
+        table_rows = []
+        for _, row in team_df.sort_values("startGameClock").iterrows():
+            grp     = outcome_group(row["shotOutcome"])
+            col     = OUTCOME_STYLE[grp][0]
+            body    = BODY_TYPE.get(row.get("bodyType",""), row.get("bodyType",""))
+            stype   = SHOT_TYPE.get(row.get("shotType",""), row.get("shotType",""))
+            snature = SHOT_NATURE.get(row.get("shotNature",""), row.get("shotNature",""))
+            height  = HEIGHT_LABEL.get(row.get("shotInitialHeight",""), "")
+            press   = PRESSURE_LABEL.get(row.get("pressureType",""), "")
+            player  = (row.get("shooter") or "").split()[-1]
+            clock   = row.get("formattedClock","")
+            outcome = {"goal":"GOAL","on_target":"On tgt","blocked":"Blocked","off_target":"Off tgt"}[grp]
+            table_rows.append((clock, player, body, stype, snature, height, press, outcome, col))
+ 
+        # Draw table using ax.table positioned below the pitch
+        col_labels = ["Time","Player","Body","Type","Nature","Height","Pressure","Result"]
+        cell_text  = [[r[0],r[1],r[2],r[3],r[4],r[5],r[6],r[7]] for r in table_rows]
+        cell_colors= [["#2a2a2a"]*8 for _ in table_rows]
+        # Colour the Result cell by outcome
+        for i, r in enumerate(table_rows):
+            cell_colors[i][7] = r[8] + "44"  # hex with alpha suffix trick
+ 
+        tbl = ax.table(
+            cellText=cell_text,
+            colLabels=col_labels,
+            cellColours=cell_colors,
+            loc="bottom",
+            bbox=[0, -0.72, 1, 0.65],
+        )
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(7.2)
+        for (row_i, col_i), cell in tbl.get_celld().items():
+            cell.set_edgecolor("#444444")
+            cell.set_text_props(color="white")
+            if row_i == 0:
+                cell.set_facecolor("#111111")
+                cell.set_text_props(color="white", fontweight="bold")
+ 
+        # ── Stats summary ────────────────────────────────────────────────────
+        n       = len(team_df)
+        goals   = len(team_df[team_df["shotOutcome"] == "G"])
+        on_tgt  = len(team_df[team_df["shotOutcome"].isin(["S","F"])])
+        blocked = len(team_df[team_df["shotOutcome"] == "B"])
+        off_tgt = n - goals - on_tgt - blocked
+        pressed = len(team_df[team_df["pressureType"] == "P"])
+ 
+        summary = f"Shots: {n}   Goals: {goals}   On target: {on_tgt}   Blocked: {blocked}   Off target: {off_tgt}   Under pressure: {pressed}/{n}"
+        ax.set_title(f"{team_label} — Shots\n{summary}",
+                     color="white", fontsize=11, weight="bold", pad=10)
+ 
+    # ── Shared legend ─────────────────────────────────────────────────────────
+    from matplotlib.lines import Line2D
+    legend_els = [
+        Line2D([0],[0], color="white", lw=0, marker="*", markersize=13,
+               markerfacecolor="#00ee44", label="Goal"),
+        Line2D([0],[0], color="white", lw=0, marker="o", markersize=10,
+               markerfacecolor="#44aaff", label="On Target (Saved)"),
+        Line2D([0],[0], color="white", lw=0, marker="D", markersize=9,
+               markerfacecolor="#ffaa00", label="Blocked"),
+        Line2D([0],[0], color="white", lw=0, marker="X", markersize=9,
+               markerfacecolor="#ff4444", label="Off Target"),
+    ]
+    fig.legend(handles=legend_els, facecolor="#333", labelcolor="white",
+               fontsize=10, loc="upper center", ncol=4,
+               framealpha=0.85, bbox_to_anchor=(0.5, 0.97))
+ 
+    fig.suptitle("Shot Map — FRA vs DEN (WC MD2 2022)",
+                 color="white", fontsize=14, weight="bold", y=1.04)
+ 
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    out = f"{OUT_DIR}/shot_map.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> {out}")
+ 
 # ════════════════════════════════════════════════════════════
 # 7.  PLAYER GRADES
 # ════════════════════════════════════════════════════════════
 def plot_player_grades(df):
     print("[5/6] Player grades...")
-
+ 
     grade_player_map = {
         "passerGrade":      "passer",
         "receiverGrade":    "receiver",
@@ -607,7 +875,7 @@ def plot_player_grades(df):
         "carrierGrade":     "carrier",
         "ballCarrierGrade": "ballCarrier",
     }
-
+ 
     grade_rows = []
     for _, row in df.iterrows():
         for grade_col, player_col in grade_player_map.items():
@@ -618,38 +886,38 @@ def plot_player_grades(df):
             if player not in FRANCE_PLAYERS:
                 continue
             grade_rows.append({"player": player, "grade": float(grade)})
-
+ 
     if not grade_rows:
         print("  No France grade data found.")
         return
-
+ 
     gdf     = pd.DataFrame(grade_rows)
     summary = (gdf.groupby("player")
                   .agg(avg_grade=("grade", "mean"), n=("grade", "count"))
                   .reset_index()
                   .sort_values("avg_grade", ascending=True))
-
+ 
     n_players  = len(summary)
     fig_height = max(7, n_players * 0.6 + 2)
     fig, ax    = plt.subplots(figsize=(12, fig_height), facecolor="#1a1a1a")
     ax.set_facecolor("#1a1a1a")
-
+ 
     colors = ["#ff4444" if g < -0.005 else
               "#44ff44" if g >  0.005 else "#888888"
               for g in summary["avg_grade"]]
-
+ 
     bars = ax.barh(range(n_players), summary["avg_grade"],
                    color=colors, alpha=0.85,
                    edgecolor="#555", linewidth=0.5, height=0.65)
-
+ 
     ax.set_yticks(range(n_players))
     ax.set_yticklabels(summary["player"], fontsize=10, color="white")
     ax.set_ylim(-0.7, n_players - 0.3)
-
+ 
     xmax = summary["avg_grade"].abs().max()
     ax.set_xlim(-xmax * 1.6, xmax * 1.6)
     ax.axvline(0, color="white", lw=1.2, alpha=0.7)
-
+ 
     for bar, (_, row) in zip(bars, summary.iterrows()):
         x      = bar.get_width()
         offset = xmax * 0.04 if x >= 0 else -xmax * 0.04
@@ -658,17 +926,16 @@ def plot_player_grades(df):
                 bar.get_y() + bar.get_height() / 2,
                 f"{row['avg_grade']:+.3f}  (n={int(row['n'])})",
                 va="center", ha=ha, color="white", fontsize=9)
-
+ 
     ax.set_xlabel("Average PFF Grade  (−2 to +2,  0 = expected)",
                   color="white", fontsize=10)
     ax.set_title("France Player Average Grades — FRA vs DEN (WC MD2 2022)",
                  color="white", fontsize=12, weight="bold", pad=12)
     ax.tick_params(colors="white")
     plt.setp(ax.get_xticklabels(), color="white")
-
     for spine in ax.spines.values():
         spine.set_edgecolor("#555")
-
+ 
     patches = [
         mpatches.Patch(color="#44ff44", label="Above expected"),
         mpatches.Patch(color="#888888", label="Expected (~0)"),
@@ -676,22 +943,22 @@ def plot_player_grades(df):
     ]
     ax.legend(handles=patches, facecolor="#333", labelcolor="white",
               fontsize=9, loc="lower right")
-
+ 
     plt.tight_layout()
     out = f"{OUT_DIR}/player_grades_france.png"
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
     plt.close()
     print(f"  -> {out}")
-
+ 
 # ════════════════════════════════════════════════════════════
 # 8.  MBAPPE EVENT ANALYSIS
 # ════════════════════════════════════════════════════════════
 def plot_mbappe_event_analysis(df):
     print("[6/6] Mbappe event-level analysis...")
-
+ 
     france_events = df[df["homeTeam"] == True].copy()
     MBAPPE_J      = "10"
-
+ 
     closest_dists, closest_jerseys, mbappe_xs, mbappe_ys = [], [], [], []
     for _, row in france_events.iterrows():
         hp     = row["_home_players"]
@@ -701,14 +968,14 @@ def plot_mbappe_event_analysis(df):
             continue
         mx = mbappe.get("x", 0)
         my = mbappe.get("y", 0)
-        if row["period"] == 2:
+        if str(row["period"]) == "2":
             mx, my = -mx, -my
-
+ 
         min_dist, min_j = 999, None
         for jnum, p in ap.items():
             ax_ = p.get("x", 0)
             ay_ = p.get("y", 0)
-            if row["period"] == 2:
+            if str(row["period"]) == "2":
                 ax_, ay_ = -ax_, -ay_
             d = np.sqrt((mx - ax_)**2 + (my - ay_)**2)
             if d < min_dist:
@@ -718,18 +985,18 @@ def plot_mbappe_event_analysis(df):
         closest_jerseys.append(min_j)
         mbappe_xs.append(mx)
         mbappe_ys.append(my)
-
+ 
     if not closest_dists:
         print("  No Mbappe data found.")
         return
-
+ 
     mdf = pd.DataFrame({
         "dist":   closest_dists,
         "jersey": closest_jerseys,
         "x":      mbappe_xs,
         "y":      mbappe_ys,
     })
-
+ 
     fig, axes = plt.subplots(1, 2, figsize=(16, 7), facecolor="#1a1a1a")
     ax = axes[0]
     draw_pitch(ax)
@@ -743,16 +1010,16 @@ def plot_mbappe_event_analysis(df):
     ax.set_title("Mbappé Position x Defender Distance\n"
                  "(Green = space, Red = tight marking)",
                  color="white", fontsize=11, weight="bold")
-
+ 
     ax2 = axes[1]
     ax2.set_facecolor("#1a1a1a")
-    jcounts = Counter(closest_jerseys)
+    jcounts  = Counter(closest_jerseys)
     sorted_j = sorted(jcounts.items(), key=lambda x: x[1], reverse=True)[:10]
     labels   = [DEN_JERSEY_NAMES.get(j, f"#{j}") for j, _ in sorted_j]
     counts   = [c for _, c in sorted_j]
     total    = sum(jcounts.values())
     pcts     = [100 * c / total for c in counts]
-
+ 
     bars = ax2.barh(labels[::-1], counts[::-1],
                     color="#1f77b4", alpha=0.85,
                     edgecolor="#555", linewidth=0.5)
@@ -760,7 +1027,7 @@ def plot_mbappe_event_analysis(df):
         ax2.text(bar.get_width() + 3,
                  bar.get_y() + bar.get_height() / 2,
                  f"{pct:.1f}%", va="center", color="white", fontsize=9)
-
+ 
     ax2.set_xlabel("Events as closest defender to Mbappé",
                    color="white", fontsize=10)
     ax2.set_title("Who Marked Mbappé Most?\n(event-level snapshots)",
@@ -770,7 +1037,7 @@ def plot_mbappe_event_analysis(df):
     plt.setp(ax2.get_xticklabels(), color="white")
     for spine in ax2.spines.values():
         spine.set_edgecolor("#555")
-
+ 
     pct_tight = 100 * (mdf["dist"] <= 5).mean()
     ax2.text(0.98, 0.05,
              f"Mean dist: {mdf['dist'].mean():.1f}m\n"
@@ -778,179 +1045,149 @@ def plot_mbappe_event_analysis(df):
              transform=ax2.transAxes, ha="right", va="bottom",
              color="#cccccc", fontsize=9,
              bbox=dict(facecolor="#333", edgecolor="#555", alpha=0.8, pad=5))
-
+ 
     fig.suptitle("Mbappé Defensive Attention — Event-Level Analysis",
                  color="white", fontsize=13, weight="bold", y=1.01)
     plt.tight_layout()
-
+ 
     out = f"{OUT_DIR}/mbappe_event_analysis.png"
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
     plt.close()
     print(f"  -> {out}")
-
-# Mbappe passes and shots
+ 
+# ════════════════════════════════════════════════════════════
+# 9.  MBAPPE PASSES & SHOTS
+# ════════════════════════════════════════════════════════════
 def plot_mbappe_passes_shots(df):
     print("Mbappe passes and shots...")
-
-    # ── Passes ──
+ 
     mbappe_passes = df[
         (df["passer"] == "Kylian Mbappé") &
         (df["possEventType"] == "PA") &
         df["ball_x"].notna() &
         df["passOutcome"].notna()
     ].copy()
-
-    # ── Shots ──
+ 
     mbappe_shots = df[
         (df["shooter"] == "Kylian Mbappé") &
         df["ball_x"].notna()
     ].copy()
-
+ 
     if mbappe_passes.empty and mbappe_shots.empty:
         print("  No Mbappe pass/shot data found.")
         return
-
+ 
     fig, axes = plt.subplots(1, 2, figsize=(22, 8), facecolor="#1a1a1a")
-
-    # ════════════════════════════════════════════════════════════
-    # Panel 1: Pass map
-    # ════════════════════════════════════════════════════════════
+ 
     ax = axes[0]
     draw_pitch(ax)
-
     completed  = mbappe_passes[mbappe_passes["passOutcome"] == "C"]
     incomplete = mbappe_passes[mbappe_passes["passOutcome"] != "C"]
-
     ax.scatter(completed["ball_x"], completed["ball_y"],
                c="#44ff44", s=100, alpha=0.85, zorder=4,
                edgecolors="#333", linewidths=0.5,
                label=f"Completed (n={len(completed)})")
     ax.scatter(incomplete["ball_x"], incomplete["ball_y"],
                c="#ff4444", s=100, alpha=0.85, zorder=4,
-               edgecolors="#333", linewidths=0.5,
-               marker="X",
+               edgecolors="#333", linewidths=0.5, marker="X",
                label=f"Incomplete (n={len(incomplete)})")
-
     for _, row in mbappe_passes.iterrows():
         if pd.notna(row["passType"]) and row["passType"] != "S":
             ax.text(row["ball_x"], row["ball_y"] + 2,
-                    row["passType"],
-                    ha="center", fontsize=7, color="white", alpha=0.7)
-
+                    row["passType"], ha="center", fontsize=7,
+                    color="white", alpha=0.7)
     total_passes = len(mbappe_passes)
     comp_pct = 100 * len(completed) // max(total_passes, 1)
     ax.legend(facecolor="#333", labelcolor="white", fontsize=9,
               loc="upper left", framealpha=0.8)
-    ax.set_title(f"Mbappé — Pass Map\n"
-                 f"({total_passes} passes | {comp_pct}% completion)",
+    ax.set_title(f"Mbappé — Pass Map\n({total_passes} passes | {comp_pct}% completion)",
                  color="white", fontsize=12, weight="bold", pad=8)
-
-    # ════════════════════════════════════════════════════════════
-    # Panel 2: Shot map
-    # ════════════════════════════════════════════════════════════
+ 
     ax2 = axes[1]
     draw_pitch(ax2)
-
     SHOT_COLORS = {
         "G": ("#44ff44", "Goal"),
-        "C": ("#ffaa00", "Saved"),
+        "S": ("#ffaa00", "Saved"),
         "B": ("#4488ff", "Blocked"),
         "O": ("#ff4444", "Off Target"),
+        "F": ("#ff4444", "Off Target"),
+        "C": ("#ffaa00", "Saved"),
     }
-    SHOT_MARKERS = {
-        "G": "*",
-        "C": "o",
-        "B": "o",
-        "O": "X",
-    }
-
-    shot_patches = []
+    SHOT_MARKERS = {"G": "*", "S": "o", "B": "o", "O": "X", "F": "X", "C": "o"}
+    shot_patches   = []
+    plotted_labels = set()
     for outcome, (col, label) in SHOT_COLORS.items():
         sub = mbappe_shots[mbappe_shots["shotOutcome"] == outcome]
         if sub.empty:
             continue
-        ax2.scatter(sub["ball_x"], sub["ball_y"],
-                    c=col,
+        ax2.scatter(sub["ball_x"], sub["ball_y"], c=col,
                     s=300 if outcome == "G" else 150,
-                    marker=SHOT_MARKERS[outcome],
-                    alpha=0.9, zorder=4,
+                    marker=SHOT_MARKERS[outcome], alpha=0.9, zorder=4,
                     edgecolors="white" if outcome == "G" else "#333",
                     linewidths=1.5 if outcome == "G" else 0.5)
-        shot_patches.append(mpatches.Patch(color=col,
-                                           label=f"{label} (n={len(sub)})"))
-
+        if label not in plotted_labels:
+            shot_patches.append(mpatches.Patch(color=col, label=f"{label} (n={len(sub)})"))
+            plotted_labels.add(label)
     for _, row in mbappe_shots.iterrows():
-        shot_type  = row["shotType"]  if pd.notna(row["shotType"])  else ""
+        shot_type   = row["shotType"]   if pd.notna(row["shotType"])   else ""
         shot_nature = row["shotNature"] if pd.notna(row["shotNature"]) else ""
-        clock      = row["formattedClock"]
-        type_label   = {"V": "Volley", "S": "Standard"}.get(shot_type, shot_type)
-        nature_label = {"P": "Power", "A": "Accurate"}.get(shot_nature, shot_nature)
-        label = f"{clock}\n{type_label} | {nature_label}"
+        type_label   = {"V": "Volley", "F": "Side Foot", "S": "Standard"}.get(shot_type, shot_type)
+        nature_label = {"P": "Power", "A": "Accurate", "F": "Flick"}.get(shot_nature, shot_nature)
         ax2.text(row["ball_x"], row["ball_y"] + 2,
-                 label,
+                 f"{row['formattedClock']}\n{type_label} | {nature_label}",
                  ha="center", fontsize=7, color="white", alpha=0.85,
                  bbox=dict(facecolor="#1a1a1a", edgecolor="none", alpha=0.5, pad=1))
-
+    n_goals = len(mbappe_shots[mbappe_shots["shotOutcome"] == "G"])
     ax2.legend(handles=shot_patches, facecolor="#333", labelcolor="white",
                fontsize=9, loc="upper left", framealpha=0.8)
-    ax2.set_title(f"Mbappé — Shots\n"
-                  f"({len(mbappe_shots)} shots | "
-                  f"{len(mbappe_shots[mbappe_shots['shotOutcome'] == 'G'])} goal)",
+    ax2.set_title(f"Mbappé — Shots\n({len(mbappe_shots)} shots | {n_goals} goal)",
                   color="white", fontsize=12, weight="bold", pad=8)
-
     ax2.text(0.98, 0.05,
              f"Volley: {len(mbappe_shots[mbappe_shots['shotType'] == 'V'])}\n"
              f"Standard: {len(mbappe_shots[mbappe_shots['shotType'] == 'S'])}\n"
              f"Power: {len(mbappe_shots[mbappe_shots['shotNature'] == 'P'])}\n"
              f"Accurate: {len(mbappe_shots[mbappe_shots['shotNature'] == 'A'])}",
-             transform=ax2.transAxes, ha="right", va="bottom",
-             color="#cccccc", fontsize=9,
+             transform=ax2.transAxes, ha="right", va="bottom", color="#cccccc", fontsize=9,
              bbox=dict(facecolor="#333", edgecolor="#555", alpha=0.8, pad=5))
-
+ 
     fig.suptitle("Mbappé — Passes & Shots — FRA vs DEN (WC MD2 2022)",
                  color="white", fontsize=14, weight="bold", y=1.01)
     plt.tight_layout()
-
     out = f"{OUT_DIR}/mbappe_passes_shots.png"
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
     plt.close()
     print(f"  -> {out}")
-
+ 
+# ════════════════════════════════════════════════════════════
+# 10.  MBAPPE CHALLENGES
+# ════════════════════════════════════════════════════════════
 def plot_mbappe_challenges(df):
     print("Mbappe challenge map...")
-
-    mbappe_ch_all = df[
-        (df["dribbler"] == "Kylian Mbappé")
-    ].copy()
-
-    outcomes = []
-    for idx in mbappe_ch_all.index:
-        next_idx = idx + 1
-        if next_idx in df.index:
-            next_event = df.loc[next_idx]
-            outcomes.append("won" if next_event["homeTeam"] == True else "lost")
-        else:
-            outcomes.append("unknown")
-    mbappe_ch_all["outcome"] = outcomes
-
-    mbappe_ch_map = mbappe_ch_all[mbappe_ch_all["ball_x"].notna()].copy()
-
+ 
+    mbappe_ch_all = df[df["dribbler"] == "Kylian Mbappé"].copy()
+ 
     if mbappe_ch_all.empty:
         print("  No Mbappe challenge data found.")
         return
-
+ 
+    mbappe_ch_all["outcome"] = mbappe_ch_all["challengeWinner"].apply(
+        lambda w: "won"  if w == "Kylian Mbappé"
+             else "lost" if pd.notna(w)
+             else "unknown"
+    )
+ 
+    mbappe_ch_map = mbappe_ch_all[mbappe_ch_all["ball_x"].notna()].copy()
+ 
     OUTCOME_COLORS = {
         "won":     ("#44ff44", "Mbappé Won"),
         "lost":    ("#ff4444", "Defender Won"),
         "unknown": ("#888888", "Unknown"),
     }
-
+ 
     fig, axes = plt.subplots(1, 2, figsize=(20, 8), facecolor="#1a1a1a")
-
-    # ── Left: pitch map ──
+ 
     ax = axes[0]
     draw_pitch(ax)
-
     patches = []
     for outcome, (col, label) in OUTCOME_COLORS.items():
         sub = mbappe_ch_map[mbappe_ch_map["outcome"] == outcome]
@@ -959,50 +1196,37 @@ def plot_mbappe_challenges(df):
         ax.scatter(sub["ball_x"], sub["ball_y"],
                    c=col, s=120, alpha=0.85, zorder=4,
                    edgecolors="#333", linewidths=0.5)
-        patches.append(mpatches.Patch(color=col,
-                                      label=f"{label} (n={len(sub)})"))
-
+        patches.append(mpatches.Patch(color=col, label=f"{label} (n={len(sub)})"))
     for _, row in mbappe_ch_map.iterrows():
         if pd.notna(row["challenger"]):
-            short = row["challenger"].split()[-1]
             ax.text(row["ball_x"], row["ball_y"] + 2,
-                    short, ha="center", fontsize=7,
-                    color="white", alpha=0.7)
-
+                    row["challenger"].split()[-1],
+                    ha="center", fontsize=7, color="white", alpha=0.7)
+ 
     total_all  = len(mbappe_ch_all)
     total_won  = len(mbappe_ch_all[mbappe_ch_all["outcome"] == "won"])
     total_lost = len(mbappe_ch_all[mbappe_ch_all["outcome"] == "lost"])
     mapped     = len(mbappe_ch_map)
-
+ 
     ax.legend(handles=patches, facecolor="#333", labelcolor="white",
               fontsize=9, loc="upper left", framealpha=0.8)
     ax.set_title(f"Mbappé — Challenge Outcomes by Location\n"
                  f"(Green = Mbappé won | Red = Defender won | "
                  f"{total_all - mapped} events missing coords)",
                  color="white", fontsize=12, weight="bold", pad=8)
-
-    # ── Right: stacked bar by challenger ──
+ 
     ax2 = axes[1]
     ax2.set_facecolor("#1a1a1a")
-
     challengers = sorted(mbappe_ch_all["challenger"].dropna().unique())
-    won_counts  = []
-    lost_counts = []
-    for c in challengers:
-        sub = mbappe_ch_all[mbappe_ch_all["challenger"] == c]
-        won_counts.append(len(sub[sub["outcome"] == "won"]))
-        lost_counts.append(len(sub[sub["outcome"] == "lost"]))
-
+    won_counts  = [len(mbappe_ch_all[(mbappe_ch_all["challenger"] == c) &
+                                     (mbappe_ch_all["outcome"] == "won")]) for c in challengers]
+    lost_counts = [len(mbappe_ch_all[(mbappe_ch_all["challenger"] == c) &
+                                     (mbappe_ch_all["outcome"] == "lost")]) for c in challengers]
     y = range(len(challengers))
-    ax2.barh(list(y), won_counts,
-             color="#44ff44", alpha=0.85,
-             edgecolor="#555", linewidth=0.5,
-             label="Mbappé Won")
-    ax2.barh(list(y), lost_counts, left=won_counts,
-             color="#ff4444", alpha=0.85,
-             edgecolor="#555", linewidth=0.5,
-             label="Defender Won")
-
+    ax2.barh(list(y), won_counts, color="#44ff44", alpha=0.85,
+             edgecolor="#555", linewidth=0.5, label="Mbappé Won")
+    ax2.barh(list(y), lost_counts, left=won_counts, color="#ff4444", alpha=0.85,
+             edgecolor="#555", linewidth=0.5, label="Defender Won")
     ax2.set_yticks(list(y))
     ax2.set_yticklabels(challengers, color="white", fontsize=9)
     ax2.set_xlabel("Number of Challenges", color="white", fontsize=10)
@@ -1013,25 +1237,22 @@ def plot_mbappe_challenges(df):
     for spine in ax2.spines.values():
         spine.set_edgecolor("#555")
     ax2.legend(facecolor="#333", labelcolor="white", fontsize=9)
-
     ax2.text(0.98, 0.05,
              f"Total challenges: {total_all}\n"
              f"Mbappé won: {total_won} ({100*total_won//max(total_all,1)}%)\n"
              f"Defender won: {total_lost} ({100*total_lost//max(total_all,1)}%)\n"
              f"Mapped on pitch: {mapped}",
-             transform=ax2.transAxes, ha="right", va="bottom",
-             color="#cccccc", fontsize=9,
+             transform=ax2.transAxes, ha="right", va="bottom", color="#cccccc", fontsize=9,
              bbox=dict(facecolor="#333", edgecolor="#555", alpha=0.8, pad=5))
-
+ 
     fig.suptitle("Mbappé — Challenge Analysis — FRA vs DEN (WC MD2 2022)",
                  color="white", fontsize=14, weight="bold", y=1.01)
     plt.tight_layout()
-
     out = f"{OUT_DIR}/mbappe_challenges.png"
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
     plt.close()
     print(f"  -> {out}")
-
+ 
 # ════════════════════════════════════════════════════════════
 # MAIN
 # ════════════════════════════════════════════════════════════
@@ -1047,4 +1268,5 @@ if __name__ == "__main__":
     plot_mbappe_event_analysis(df)
     plot_mbappe_challenges(df)
     plot_mbappe_passes_shots(df)
+    plot_shot_map(df)
     print(f"\nAll done — files saved to {OUT_DIR}")
