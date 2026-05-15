@@ -28,12 +28,16 @@ from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
 from collections import defaultdict, Counter
 
+# ════════════════════════════════════════════════════════════
+# CONFIGURATION — edit these paths for your machine
+# ════════════════════════════════════════════════════════════
 DATA_DIR     = r"C:\Users\stafa\Downloads"
 PER_GAME_DIR = r"C:\Users\stafa\Downloads\soccerproject\per_game"
 COMP_DIR     = r"C:\Users\stafa\Downloads\soccerproject\comparative"
 
-#GAME REGISTERING
-
+# ════════════════════════════════════════════════════════════
+# GAME REGISTRY
+# ════════════════════════════════════════════════════════════
 GAME_META = {
     "3819":  {"label": "FRA 4-1 AUS", "label_short": "vs AUS",
                "opponent": "Australia",  "stage": "Group MD1",    "result": "W"},
@@ -87,14 +91,14 @@ SHORT_NAME = {
 RESULT_COLOR = {"W": "#44cc66", "D": "#ffcc44", "L": "#ff4444"}
 
 
-
+# ════════════════════════════════════════════════════════════
 # LOAD & FLATTEN
 # Two filters applied on every row before it enters the DataFrame:
 #   1. nonEvent=True  — data provider flagged row as not a real event
 #      (removes e.g. Griezmann's disallowed goal vs TUN, Ghandri phantom goal)
 #   2. is_pen_shootout — Argentina clock > 120 min = penalty shootout
 #      These rows are kept in the df but tagged so plots can exclude them.
-
+# ════════════════════════════════════════════════════════════
 def load_and_flatten(path, game_id):
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
@@ -219,8 +223,9 @@ def load_and_flatten(path, game_id):
     return df, france_is_home
 
 
-#PITCH DRAWING
-
+# ════════════════════════════════════════════════════════════
+# PITCH DRAWING HELPERS
+# ════════════════════════════════════════════════════════════
 def draw_pitch(ax, length=105, width=68, line_color="white",
                bg="#2d5c2d", lw=1.5, attack_label="France attack →"):
     ax.set_facecolor(bg)
@@ -278,10 +283,9 @@ def xtick_labels(gids):
     return [f"{GAME_META[g]['label_short']}\n{GAME_META[g]['stage']}" for g in gids]
 
 
-
-
-# PER GAME PASSING NETWORK#
-
+# ════════════════════════════════════════════════════════════
+# PER-GAME 1 — PASSING NETWORK
+# ════════════════════════════════════════════════════════════
 def plot_passing_network(df, game_id, out_dir):
     meta = GAME_META[game_id]
     # exclude penalty shootout rows
@@ -375,10 +379,9 @@ def plot_passing_network(df, game_id, out_dir):
     print(f"  -> 01_passing_network_{game_id}.png")
 
 
-
-
-# PER GAME PRESS MAP #
-
+# ════════════════════════════════════════════════════════════
+# PER-GAME 2 — PRESS MAP
+# ════════════════════════════════════════════════════════════
 def plot_press_map(df, game_id, out_dir):
     meta = GAME_META[game_id]; opp = meta["opponent"]
     df = df[~df["is_pen_shootout"]]
@@ -419,9 +422,9 @@ def plot_press_map(df, game_id, out_dir):
     print(f"  -> 02_press_map_{game_id}.png")
 
 
-
-
-# PER GAME # LINES BROKEN#
+# ════════════════════════════════════════════════════════════
+# PER-GAME 3 — LINES BROKEN
+# ════════════════════════════════════════════════════════════
 LINE_COLORS = {
     "D":   ("#ff4444","Defense only"),   "M":  ("#ffaa00","Midfield only"),
     "MD":  ("#ff6600","Mid+Defense"),    "A":  ("#44ff44","Attack only"),
@@ -468,9 +471,9 @@ def plot_lines_broken(df, game_id, out_dir):
     print(f"  -> 03_lines_broken_{game_id}.png")
 
 
-
-
-# PER GAME CHANCE CREATION#
+# ════════════════════════════════════════════════════════════
+# PER-GAME 4 — CHANCE CREATION
+# ════════════════════════════════════════════════════════════
 def plot_chance_creation(df, game_id, out_dir):
     meta = GAME_META[game_id]; opp = meta["opponent"]
     df = df[~df["is_pen_shootout"]]
@@ -543,9 +546,9 @@ def plot_chance_creation(df, game_id, out_dir):
     print(f"  -> 04_chance_creation_{game_id}.png")
 
 
-
-
-# PER GAME SHOT MAP#
+# ════════════════════════════════════════════════════════════
+# PER-GAME 5 — SHOT MAP
+# ════════════════════════════════════════════════════════════
 def plot_shot_map(df, game_id, out_dir):
     meta = GAME_META[game_id]; opp = meta["opponent"]
     # exclude penalty shootout
@@ -665,9 +668,9 @@ def plot_shot_map(df, game_id, out_dir):
         print(f"  -> 05b_shot_map_opponent_{game_id}.png")
 
 
-
-
-# ═PER GAME PLAYER GRADES
+# ════════════════════════════════════════════════════════════
+# PER-GAME 6 — PLAYER GRADES
+# ════════════════════════════════════════════════════════════
 def plot_player_grades(df, game_id, out_dir):
     meta = GAME_META[game_id]
     df = df[~df["is_pen_shootout"]]
@@ -743,9 +746,9 @@ def plot_player_grades(df, game_id, out_dir):
     print(f"  -> 06_player_grades_{game_id}.png")
 
 
-
-
-# MBAPPE PASSES AND SHOTS
+# ════════════════════════════════════════════════════════════
+# PER-GAME 7 — MBAPPÉ PASSES & SHOTS
+# ════════════════════════════════════════════════════════════
 def plot_mbappe_passes_shots(df, game_id, out_dir):
     meta = GAME_META[game_id]
     df = df[~df["is_pen_shootout"]]
@@ -811,9 +814,9 @@ def plot_mbappe_passes_shots(df, game_id, out_dir):
     print(f"  -> 07_mbappe_passes_shots_{game_id}.png")
 
 
-
-
-# MBAPPE DEFENDER DISTANCE
+# ════════════════════════════════════════════════════════════
+# PER-GAME 8 — MBAPPÉ DEFENDER DISTANCE
+# ════════════════════════════════════════════════════════════
 def plot_mbappe_event_analysis(df, game_id, out_dir, france_is_home):
     meta = GAME_META[game_id]; MBAPPE_J = "10"
     fe = df[df["is_france"] & ~df["is_pen_shootout"]].copy()
@@ -882,9 +885,9 @@ def plot_mbappe_event_analysis(df, game_id, out_dir, france_is_home):
     print(f"  -> 08_mbappe_defender_dist_{game_id}.png")
 
 
-
-
-#SET PIECE ANALYSIS#
+# ════════════════════════════════════════════════════════════
+# PER-GAME 9 — SET PIECES
+# ════════════════════════════════════════════════════════════
 def plot_set_pieces(df, game_id, out_dir):
     meta = GAME_META[game_id]; opp = meta["opponent"]
     df = df[~df["is_pen_shootout"]]
@@ -1004,9 +1007,9 @@ def plot_set_pieces(df, game_id, out_dir):
     print(f"  -> 09_set_pieces_{game_id}.png")
 
 
-
-
-# SEQUENCE ANALYSIS#
+# ════════════════════════════════════════════════════════════
+# PER-GAME 10 — SEQUENCE ANALYSIS
+# ════════════════════════════════════════════════════════════
 def plot_sequence_analysis(df, game_id, out_dir):
     meta = GAME_META[game_id]; opp = meta["opponent"]
     df = df[~df["is_pen_shootout"]]
@@ -1158,10 +1161,11 @@ def plot_sequence_analysis(df, game_id, out_dir):
     print(f"  -> 10_sequence_analysis_{game_id}.png")
 
 
-
-
+# ════════════════════════════════════════════════════════════
 # COMPARATIVE STATS BUILDER
-
+# All stats exclude nonEvent rows (handled at load time) and
+# Argentina penalty shootout rows (is_pen_shootout==True).
+# ════════════════════════════════════════════════════════════
 def build_comparative_stats(all_dfs, all_home):
     GMAP = {"passerGrade":"passer","receiverGrade":"receiver",
             "shooterGrade":"shooter","dribbleGrade":"dribbler",
@@ -1257,10 +1261,9 @@ def build_comparative_stats(all_dfs, all_home):
     return pd.DataFrame(stats)
 
 
-
-
+# ════════════════════════════════════════════════════════════
 # COMPARATIVE 1 — OVERVIEW DASHBOARD
-
+# ════════════════════════════════════════════════════════════
 def plot_comparative_overview(stats_df, out_dir):
     print("  -> COMP_01 overview...")
     gids   = GAME_ORDER
@@ -1368,11 +1371,9 @@ def plot_comparative_overview(stats_df, out_dir):
     print(f"     -> COMP_01_overview.png")
 
 
-
-
-
+# ════════════════════════════════════════════════════════════
 # COMPARATIVE 2 — MBAPPÉ DEEP DIVE
-
+# ════════════════════════════════════════════════════════════
 def plot_comparative_mbappe(all_dfs, stats_df, out_dir):
     print("  -> COMP_02 Mbappé...")
     gids  = GAME_ORDER
@@ -1479,11 +1480,9 @@ def plot_comparative_mbappe(all_dfs, stats_df, out_dir):
     print(f"     -> COMP_02_mbappe_tournament.png")
 
 
-
-
-
+# ════════════════════════════════════════════════════════════
 # COMPARATIVE 3 — PLAYER GRADE HEATMAP
-
+# ════════════════════════════════════════════════════════════
 def plot_comparative_player_grades(all_dfs, out_dir):
     print("  -> COMP_03 player grades heatmap...")
     GMAP = {"passerGrade":"passer","receiverGrade":"receiver",
@@ -1563,11 +1562,9 @@ def plot_comparative_player_grades(all_dfs, out_dir):
     print(f"     -> COMP_03_player_grades_heatmap.png")
 
 
-
-
-
+# ════════════════════════════════════════════════════════════
 # COMPARATIVE 4 — PRESSING & TERRITORY
-
+# ════════════════════════════════════════════════════════════
 def plot_comparative_pressing(all_dfs, out_dir):
     print("  -> COMP_04 pressing & territory...")
     gids  = GAME_ORDER
@@ -1675,10 +1672,9 @@ def plot_comparative_pressing(all_dfs, out_dir):
     print(f"     -> COMP_04_pressing_territory.png")
 
 
-
-
+# ════════════════════════════════════════════════════════════
 # COMPARATIVE 5 — PASSING OVERLAY
-
+# ════════════════════════════════════════════════════════════
 def plot_comparative_passing_network_overlay(all_dfs, out_dir):
     print("  -> COMP_05 passing overlay...")
     game_cols = {"3819":"#ff4444","3834":"#4488ff","3849":"#ffff00",
@@ -1735,11 +1731,9 @@ def plot_comparative_passing_network_overlay(all_dfs, out_dir):
     print(f"     -> COMP_05_passing_overlay.png")
 
 
-
-
-
+# ════════════════════════════════════════════════════════════
 # COMPARATIVE 6 — CHANCES & GOALS
-
+# ════════════════════════════════════════════════════════════
 def plot_comparative_chances_goals(all_dfs, stats_df, out_dir):
     print("  -> COMP_06 chances & goals...")
     gids  = GAME_ORDER
@@ -1834,9 +1828,11 @@ def plot_comparative_chances_goals(all_dfs, stats_df, out_dir):
     print(f"     -> COMP_06_chances_goals.png")
 
 
-
+# ════════════════════════════════════════════════════════════
 # MAIN
+# ════════════════════════════════════════════════════════════
 
+# ════════════════════════════════════════════════════════════
 # PER-GAME 11 — TEAM SHAPE AROUND BIG MOMENTS
 # Big moments detected from raw data:
 #   Goals     : possEventType=SH + shotOutcome=G (not nonEvent, not pen shootout)
@@ -1844,7 +1840,7 @@ def plot_comparative_chances_goals(all_dfs, stats_df, out_dir):
 #   Subs      : gameEventType=SUB
 # No red cards are present in these 7 games (all OFF events = temporary injury exits
 # confirmed by the player returning in later events).
-
+# ════════════════════════════════════════════════════════════
 def extract_big_moments(raw, game_id, france_is_home):
     """Return list of big moment dicts sorted by clock."""
     moments = []
@@ -1863,6 +1859,9 @@ def extract_big_moments(raw, game_id, france_is_home):
             continue
 
         # Goal (regular shot)
+        # Note: gameEventType=G is NOT a reliable own goal signal in this data —
+        # it fires as a PFF internal marker and does not correspond to real goals.
+        # All real goals are captured via shotOutcomeType=G only.
         if pe.get("shotOutcomeType") == "G" and not is_pen(clock):
             scorer   = pe.get("shooterPlayerName", "") or "Unknown"
             is_fra   = (team == "France")
@@ -1875,25 +1874,8 @@ def extract_big_moments(raw, game_id, france_is_home):
                 "color": "#00ee44" if is_fra else "#ff4444",
             })
 
-        # Own goal (gameEventType G)
-        elif etype == "G" and not is_pen(clock):
-            # Determine beneficiary from previous event's team
-            prev_team = ""
-            if i > 0:
-                prev_ge = raw[i-1].get("gameEvents") or {}
-                prev_team = prev_ge.get("teamName", "")
-            opp = GAME_META[game_id]["opponent"]
-            beneficiary = prev_team if prev_team else "Unknown"
-            is_fra_benefit = (beneficiary == "France")
-            moments.append({
-                "clock": clock, "fmt": fmt, "type": "own_goal",
-                "label": f"[OG] OWN GOAL\n→ {beneficiary} {fmt}",
-                "team": beneficiary, "is_france": is_fra_benefit,
-                "color": "#00ee44" if is_fra_benefit else "#ff4444",
-            })
-
-        # Substitution
-        elif etype == "SUB" and not is_pen(clock):
+        # Substitution — separate if (not elif) so a row can't block goal detection
+        if etype == "SUB" and not is_pen(clock):
             off  = ge.get("playerOffName", "") or "?"
             on   = ge.get("playerOnName",  "") or "?"
             # SUB team is often None in data — infer from next OTB event
@@ -2100,7 +2082,7 @@ def plot_team_shape(df, game_id, out_dir, france_is_home):
         figsize=(max(16, match_mins * 0.22 + 2), 5), facecolor="#1a1a1a")
     ax_tl.set_facecolor("#1a1a1a")
     ax_tl.set_xlim(-2, match_mins + 3)
-    ax_tl.set_ylim(-0.5, 3.5)
+    ax_tl.set_ylim(-0.5, 4.5)   # taller to accommodate jitter
     ax_tl.axis("off")
 
     # Phase background bands
@@ -2112,21 +2094,28 @@ def plot_team_shape(df, game_id, out_dir, france_is_home):
     for div_min, div_lbl in [(45,"HT"), (90,"90'"), (105,"105'"), (120,"120'")]:
         if div_min <= match_mins:
             ax_tl.axvline(div_min, color="#555", lw=1.5, ls="--", alpha=0.8)
-            ax_tl.text(div_min, 3.2, div_lbl, ha="center",
+            ax_tl.text(div_min, 4.1, div_lbl, ha="center",
                        color="#888", fontsize=9)
 
     # Timeline spine
     ax_tl.axhline(1, color="#444", lw=1.5, alpha=0.6)
 
-    # Plot each moment
-    plotted_clocks = {}
+    # Jitter: assign vertical level based on proximity in seconds (not just minute buckets).
+    # Any two moments within 120 seconds of each other get stacked.
+    JITTER_WINDOW = 120   # seconds — events closer than this stack vertically
+    assigned = []         # list of (clock, y_level) already placed
+    def get_jitter(clock):
+        level = 0
+        while any(abs(clock - c) < JITTER_WINDOW and l == level for c, l in assigned):
+            level += 1
+        assigned.append((clock, level))
+        return level
+
     for m in moments:
-        mins = m["clock"] / 60
-        col  = m["color"]
-        key  = round(mins)
-        jitter = plotted_clocks.get(key, 0)
-        plotted_clocks[key] = jitter + 1
-        y_pos = 1 + jitter * 0.55
+        mins  = m["clock"] / 60
+        col   = m["color"]
+        level = get_jitter(m["clock"])
+        y_pos = 1 + level * 0.65
 
         ax_tl.scatter(mins, y_pos, s=200, c=col, zorder=5,
                       edgecolors="white", linewidths=1.3)
