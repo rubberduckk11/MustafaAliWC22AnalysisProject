@@ -1,0 +1,2301 @@
+"""
+France WC 2022 — Full Tournament Analysis
+Per-game plots + cross-game comparative dashboard
+
+VERIFIED STATS (all nonEvent=True rows filtered, ARG pen shootout excluded):
+  AUS: FRA 4-1 | FRA shots 22, OPP 4  | pass% 89.9% | press 359/249
+  DEN: FRA 2-1 | FRA shots 20, OPP 10 | pass% 87.5% | press 290/314
+  TUN: FRA 0-1 | FRA shots  8, OPP  5 | pass% 87.1% | press 364/313
+  POL: FRA 3-1 | FRA shots 16, OPP 10 | pass% 87.5% | press 327/231
+  ENG: FRA 2-1 | FRA shots  8, OPP 15 | pass% 82.1% | press 253/275
+  MAR: FRA 2-0 | FRA shots 14, OPP 13 | pass% 83.3% | press 291/357
+  ARG: FRA 3-3 AET (ARG win 4-2 pens)
+       FRA shots 9, OPP 20 (excl pen shootout) | pass% 79.0%
+  ARG goals: REG 2-2, ET 3-3, Pens ARG 4-2
+  Mbappé ARG: 3 goals (2 reg, 1 ET) — pen shootout goal excluded from stats
+"""
+
+import json, os
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle, Arc
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+from collections import defaultdict, Counter
+
+DATA_DIR     = r"C:\Users\stafa\Downloads"
+PER_GAME_DIR = r"C:\Users\stafa\Downloads\soccerproject\per_game"
+COMP_DIR     = r"C:\Users\stafa\Downloads\soccerproject\comparative"
+
+#GAME REGISTERING
+
+GAME_META = {
+    "3819":  {"label": "FRA 4-1 AUS", "label_short": "vs AUS",
+               "opponent": "Australia",  "stage": "Group MD1",    "result": "W"},
+    "3834":  {"label": "FRA 2-1 DEN", "label_short": "vs DEN",
+               "opponent": "Denmark",    "stage": "Group MD2",    "result": "W"},
+    "3849":  {"label": "FRA 0-1 TUN", "label_short": "vs TUN",
+               "opponent": "Tunisia",    "stage": "Group MD3",    "result": "L"},
+    "10504": {"label": "FRA 3-1 POL", "label_short": "vs POL",
+               "opponent": "Poland",     "stage": "Round of 16",  "result": "W"},
+    "10513": {"label": "FRA 2-1 ENG", "label_short": "vs ENG",
+               "opponent": "England",    "stage": "Quarter-Final", "result": "W"},
+    "10515": {"label": "FRA 2-0 MAR", "label_short": "vs MAR",
+               "opponent": "Morocco",    "stage": "Semi-Final",   "result": "W"},
+    "10517": {"label": "FRA 3-3 ARG (AET)\nARG win 4-2 pens",
+               "label_short": "vs ARG",
+               "opponent": "Argentina",  "stage": "Final",        "result": "L"},
+}
+
+GAME_ORDER = ["3819","3834","3849","10504","10513","10515","10517"]
+
+FILE_MAP = {
+    "3819": "3819.json", "3834": "3834.json", "3849": "3849.json",
+    "10504": "10504.json", "10513": "10513.json",
+    "10515": "10515.json", "10517": "10517.json",
+}
+
+FRANCE_PLAYERS = {
+    'Adrien Rabiot','Antoine Griezmann','Aurélien Tchouaméni',
+    'Dayot Upamecano','Hugo Lloris','Ibrahima Konaté',
+    'Jules Kounde','Kingsley Coman','Kylian Mbappé',
+    'Marcus Thuram','Olivier Giroud','Ousmane Dembele',
+    'Raphael Varane','Theo Hernandez','Youssouf Fofana',
+    'Randal Kolo Muani','Eduardo Camavinga','Matteo Guendouzi',
+    'William Saliba','Benjamin Pavard','Axel Disasi',
+}
+
+SHORT_NAME = {
+    'Theo Hernandez':'T.Hernandez','Aurélien Tchouaméni':'Tchouaméni',
+    'Dayot Upamecano':'Upamecano','Ibrahima Konaté':'Konaté',
+    'Raphael Varane':'Varane','Antoine Griezmann':'Griezmann',
+    'Ousmane Dembele':'Dembele','Kylian Mbappé':'Mbappé',
+    'Olivier Giroud':'Giroud','Adrien Rabiot':'Rabiot',
+    'Hugo Lloris':'Lloris','Jules Kounde':'Kounde',
+    'Kingsley Coman':'Coman','Youssouf Fofana':'Fofana',
+    'Marcus Thuram':'Thuram','Randal Kolo Muani':'Kolo Muani',
+    'Eduardo Camavinga':'Camavinga','William Saliba':'Saliba',
+    'Benjamin Pavard':'Pavard','Axel Disasi':'Disasi',
+    'Matteo Guendouzi':'Guendouzi',
+}
+
+RESULT_COLOR = {"W": "#44cc66", "D": "#ffcc44", "L": "#ff4444"}
+
+
+
+# LOAD & FLATTEN
+# Two filters applied on every row before it enters the DataFrame:
+#   1. nonEvent=True  — data provider flagged row as not a real event
+#      (removes e.g. Griezmann's disallowed goal vs TUN, Ghandri phantom goal)
+#   2. is_pen_shootout — Argentina clock > 120 min = penalty shootout
+#      These rows are kept in the df but tagged so plots can exclude them.
+
+def load_and_flatten(path, game_id):
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    if not isinstance(raw, list) or not raw or "gameEvents" not in (raw[0] or {}):
+        raise ValueError(f"Bad file: {path}")
+
+    rows = []
+    for i, r in enumerate(raw):
+        ge       = r.get("gameEvents")       or {}
+        it       = r.get("initialTouch")     or {}
+        pe       = r.get("possessionEvents") or {}
+        fo_raw   = r.get("fouls")            or {}
+        fo       = fo_raw if isinstance(fo_raw, dict) else (fo_raw[0] if fo_raw else {})
+        gr       = r.get("grades")           or {}
+        ball_raw = r.get("ball")             or []
+        ball     = ball_raw[0] if isinstance(ball_raw, list) and ball_raw else {}
+
+        # ── Drop rows the data provider marked as non-events ─────────────────
+        if pe.get("nonEvent"):
+            continue
+
+        home_players = {str(p["jerseyNum"]): p for p in (r.get("homePlayers") or [])}
+        away_players = {str(p["jerseyNum"]): p for p in (r.get("awayPlayers") or [])}
+
+        end_x = end_y = None
+        rec_id  = pe.get("receiverPlayerId")
+        targ_id = pe.get("targetPlayerId")
+        pool    = (r.get("homePlayers") or []) + (r.get("awayPlayers") or [])
+        if rec_id is not None:
+            for p in pool:
+                if p.get("playerId") == rec_id:
+                    end_x, end_y = p.get("x"), p.get("y"); break
+        if end_x is None and targ_id is not None:
+            for p in pool:
+                if p.get("playerId") == targ_id:
+                    end_x, end_y = p.get("x"), p.get("y"); break
+        if end_x is None and i + 1 < len(raw):
+            nb = raw[i + 1].get("ball") or []
+            if nb:
+                end_x, end_y = nb[0].get("x"), nb[0].get("y")
+
+        clock_sec     = ge.get("startGameClock") or 0
+        is_pen        = (game_id == "10517" and clock_sec > 120 * 60)
+
+        rows.append({
+            "game_id":              game_id,
+            "sequence":             r.get("sequence"),
+            "period":               ge.get("period"),
+            "homeTeam":             ge.get("homeTeam"),
+            "teamName":             ge.get("teamName"),
+            "playerName":           ge.get("playerName"),
+            "setpieceType":         ge.get("setpieceType"),
+            "startGameClock":       clock_sec,
+            "formattedClock":       ge.get("startFormattedGameClock"),
+            "initialPressureType":  it.get("initialPressureType"),
+            "possEventType":        pe.get("possessionEventType"),
+            "pressureType":         pe.get("pressureType"),
+            "pressurePlayer":       pe.get("pressurePlayerName"),
+            "opportunityType":      pe.get("opportunityType"),
+            "linesBroken":          pe.get("linesBrokenType"),
+            "betterOption":         pe.get("betterOptionType"),
+            "createsSpace":         pe.get("createsSpace"),
+            "passer":               pe.get("passerPlayerName"),
+            "passType":             pe.get("passType"),
+            "passOutcome":          pe.get("passOutcomeType"),
+            "target":               pe.get("targetPlayerName"),
+            "receiver":             pe.get("receiverPlayerName"),
+            "accuracyType":         pe.get("accuracyType"),
+            "crossType":            pe.get("crossType"),
+            "crossOutcome":         pe.get("crossOutcomeType"),
+            "shooter":              pe.get("shooterPlayerName"),
+            "shotType":             pe.get("shotType"),
+            "shotNature":           pe.get("shotNatureType"),
+            "shotOutcome":          pe.get("shotOutcomeType"),
+            "challengeType":        pe.get("challengeType"),
+            "challenger":           pe.get("challengerPlayerName"),
+            "challengeWinner":      pe.get("challengeWinnerPlayerName"),
+            "carrier":              pe.get("carrierPlayerName"),
+            "dribbler":             pe.get("dribblerPlayerName"),
+            "carryType":            pe.get("carryType"),
+            "carryIntent":          pe.get("carryIntent"),
+            "carrySuccessful":      pe.get("carrySuccessful"),
+            "ballCarrier":          pe.get("ballCarrierPlayerName"),
+            "shotInitialHeight":    pe.get("shotInitialHeightType"),
+            "bodyType":             pe.get("bodyType"),
+            "passerGrade":          gr.get("passerGrade"),
+            "receiverGrade":        gr.get("receiverGrade"),
+            "targetGrade":          gr.get("targetGrade"),
+            "shooterGrade":         gr.get("shooterGrade"),
+            "dribbleGrade":         gr.get("dribblerGrade"),
+            "challengerGrade":      gr.get("challengerGrade"),
+            "carrierGrade":         gr.get("carrierGrade"),
+            "ballCarrierGrade":     gr.get("ballCarrierGrade"),
+            "foulType":             fo.get("foulType"),
+            "victim":               fo.get("victimPlayerName"),
+            "ball_x":               ball.get("x"),
+            "ball_y":               ball.get("y"),
+            "end_x":                end_x,
+            "end_y":                end_y,
+            "is_pen_shootout":      is_pen,
+            "_home_players":        home_players,
+            "_away_players":        away_players,
+        })
+
+    df = pd.DataFrame(rows)
+
+    # Determine France home/away
+    france_is_home = True
+    fr = df[df["teamName"] == "France"]["homeTeam"]
+    if len(fr):
+        france_is_home = bool(fr.mode().iloc[0])
+
+    # Flip period 2 so France always attacks right (+x)
+    mask2 = df["period"].astype(str) == "2"
+    df.loc[mask2, ["ball_x","ball_y","end_x","end_y"]] *= -1
+
+    # If France is the away side, flip all coords
+    if not france_is_home:
+        df[["ball_x","ball_y","end_x","end_y"]] *= -1
+
+    df["is_france"] = df["teamName"] == "France"
+    return df, france_is_home
+
+
+#PITCH DRAWING
+
+def draw_pitch(ax, length=105, width=68, line_color="white",
+               bg="#2d5c2d", lw=1.5, attack_label="France attack →"):
+    ax.set_facecolor(bg)
+    ax.set_xlim(-length/2-3, length/2+3)
+    ax.set_ylim(-width/2-3, width/2+3)
+    ax.set_aspect("equal"); ax.axis("off")
+    kw = dict(edgecolor=line_color, fill=False, linewidth=lw)
+    ax.add_patch(Rectangle((-length/2,-width/2), length, width, **kw))
+    ax.plot([0,0], [-width/2,width/2], color=line_color, lw=lw)
+    ax.add_patch(plt.Circle((0,0), 9.15, **kw))
+    ax.plot(0, 0, "o", color=line_color, ms=2)
+    for side in [-1, 1]:
+        xp = side * length / 2
+        ax.add_patch(Rectangle((xp-side*16.5,-20.15), side*16.5, 40.3, **kw))
+        ax.add_patch(Rectangle((xp-side*5.5, -9.15),  side*5.5,  18.3, **kw))
+        ax.plot(xp-side*11, 0, "o", color=line_color, ms=2)
+        t1, t2 = (127,233) if side==1 else (307,413)
+        ax.add_patch(Arc((xp-side*11,0), 18.3, 18.3, theta1=t1, theta2=t2,
+                         color=line_color, lw=lw))
+        ax.plot([xp,xp], [-3.66,3.66], color=line_color, lw=3)
+    ax.annotate("", xy=(length/2-2,-width/2+2), xytext=(length/2-10,-width/2+2),
+                arrowprops=dict(arrowstyle="->", color=line_color, lw=1, alpha=0.5))
+    ax.text(length/2-6, -width/2+4, attack_label,
+            color=line_color, fontsize=7, alpha=0.5, ha="center")
+
+
+def draw_attacking_half(ax, lc="white", bg="#1e2a1e", lw=1.8):
+    ax.set_facecolor(bg)
+    ax.set_xlim(17,56); ax.set_ylim(-26,26)
+    ax.set_aspect("equal"); ax.axis("off")
+    kw = dict(edgecolor=lc, fill=False, linewidth=lw)
+    ax.plot([17,17], [-34,34], color=lc, lw=lw, ls="--", alpha=0.3)
+    ax.plot([17,52.5], [34,34], color=lc, lw=lw)
+    ax.plot([17,52.5], [-34,-34], color=lc, lw=lw)
+    ax.plot([52.5,52.5], [-34,-3.66], color=lc, lw=lw)
+    ax.plot([52.5,52.5], [3.66,34], color=lc, lw=lw)
+    ax.plot([52.5,52.5], [-3.66,3.66], color=lc, lw=5)
+    ax.plot([52.5,54.5], [-3.66,-3.66], color=lc, lw=lw)
+    ax.plot([52.5,54.5], [3.66,3.66], color=lc, lw=lw)
+    ax.plot([54.5,54.5], [-3.66,3.66], color=lc, lw=lw)
+    ax.add_patch(Rectangle((36.0,-20.15), 16.5, 40.3, **kw))
+    ax.add_patch(Rectangle((47.0,-9.15),   5.5, 18.3, **kw))
+    ax.plot(41.5, 0, "o", color=lc, ms=3)
+    ax.add_patch(Arc((41.5,0), 18.3, 18.3, theta1=307, theta2=413, color=lc, lw=lw))
+
+
+def style_dark_ax(ax):
+    ax.set_facecolor("#1a1a1a")
+    ax.tick_params(colors="white")
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#555")
+
+
+def xtick_labels(gids):
+    return [f"{GAME_META[g]['label_short']}\n{GAME_META[g]['stage']}" for g in gids]
+
+
+
+
+# PER GAME PASSING NETWORK#
+
+def plot_passing_network(df, game_id, out_dir):
+    meta = GAME_META[game_id]
+    # exclude penalty shootout rows
+    df = df[~df["is_pen_shootout"]]
+
+    fp = df[df["is_france"] & (df["possEventType"]=="PA") &
+            df["passer"].notna() & df["ball_x"].notna()].copy()
+    if fp.empty: return
+
+    node_pos = (fp.groupby("passer")[["ball_x","ball_y"]]
+                  .mean().rename(columns={"ball_x":"x","ball_y":"y"}))
+    comp         = fp[fp["passOutcome"]=="C"]
+    edge_counts  = defaultdict(int)
+    all_attempts = defaultdict(int)
+    for _, row in comp.iterrows():
+        if pd.notna(row["receiver"]):
+            edge_counts[(row["passer"], row["receiver"])] += 1
+    for _, row in fp.iterrows():
+        if pd.notna(row["target"]):
+            all_attempts[(row["passer"], row["target"])] += 1
+
+    fig = plt.figure(figsize=(20,9), facecolor="#1a1a1a")
+    gs  = fig.add_gridspec(1,2, width_ratios=[3,1], wspace=0.05)
+    ax  = fig.add_subplot(gs[0,0])
+    ax_t= fig.add_subplot(gs[0,1])
+    draw_pitch(ax)
+
+    max_e = max(edge_counts.values(), default=1)
+    for (pa, re), count in edge_counts.items():
+        if count < 2 or pa not in node_pos.index or re not in node_pos.index: continue
+        x1,y1 = node_pos.loc[pa, ["x","y"]]
+        x2,y2 = node_pos.loc[re, ["x","y"]]
+        c = count / max(all_attempts.get((pa,re), 1), 1)
+        ax.annotate("", xy=(x2,y2), xytext=(x1,y1),
+                    arrowprops=dict(arrowstyle="-|>", color=plt.cm.RdYlGn(c),
+                                   lw=0.8+5.5*(count/max_e), mutation_scale=14, alpha=0.85))
+
+    pc = fp.groupby("passer").size()
+    for player, (px, py) in node_pos.iterrows():
+        n = pc.get(player, 1)
+        ax.scatter(px, py, s=150+700*(n/pc.max()), c="#1f77b4",
+                   zorder=5, edgecolors="white", linewidths=2)
+        ax.text(px, py+3, SHORT_NAME.get(player, player.split()[-1]),
+                ha="center", va="bottom", fontsize=8, color="white",
+                weight="bold", zorder=6)
+
+    sm = ScalarMappable(cmap="RdYlGn", norm=Normalize(0,1)); sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax, fraction=0.022, pad=0.02)
+    cb.set_label("Pass completion rate", color="white", fontsize=9)
+    plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
+    cb.ax.yaxis.set_tick_params(color="white")
+    ax.set_title(f"France Passing Network — {meta['stage']}: {meta['label']}",
+                 color="white", fontsize=13, weight="bold", pad=10)
+    ax.text(0, -37,
+            "Nodes=avg passing position | Size=pass volume | Arrow width=frequency | Colour=completion%",
+            ha="center", color="#aaaaaa", fontsize=7.5)
+
+    # Side table
+    ax_t.set_facecolor("#1a1a1a"); ax_t.axis("off")
+    rows_t = []
+    for (p,r) in set(edge_counts) | set(all_attempts):
+        c2 = edge_counts.get((p,r), 0); a = all_attempts.get((p,r), c2)
+        if a < 2: continue
+        rows_t.append((p, r, c2, a))
+    rows_t.sort(key=lambda t: (-t[2], -t[3])); rows_t = rows_t[:20]
+    ax_t.text(0.5,0.985, f"Top {len(rows_t)} pass combos",
+              transform=ax_t.transAxes, ha="center", va="top",
+              color="white", fontsize=12, weight="bold")
+    ax_t.text(0.02,0.945,"From → To", transform=ax_t.transAxes,
+              ha="left", va="top", color="#aaaaaa", fontsize=9, weight="bold")
+    ax_t.text(0.78,0.945,"Comp/Att", transform=ax_t.transAxes,
+              ha="right", va="top", color="#aaaaaa", fontsize=9, weight="bold")
+    ax_t.text(0.99,0.945,"%", transform=ax_t.transAxes,
+              ha="right", va="top", color="#aaaaaa", fontsize=9, weight="bold")
+    ax_t.plot([0.02,0.99],[0.93,0.93], transform=ax_t.transAxes, color="#555", lw=0.8)
+    if rows_t:
+        y_top, y_bot = 0.91, 0.02
+        step = (y_top-y_bot) / max(len(rows_t), 1)
+        for idx, (p,r,c2,a) in enumerate(rows_t):
+            y = y_top - idx*step; pct = 100*c2/max(a,1)
+            ax_t.text(0.02, y, f"{SHORT_NAME.get(p,p.split()[-1])} → {SHORT_NAME.get(r,r.split()[-1])}",
+                      transform=ax_t.transAxes, ha="left", va="top", color="white", fontsize=8.5)
+            ax_t.text(0.78, y, f"{c2}/{a}", transform=ax_t.transAxes,
+                      ha="right", va="top", color="white", fontsize=8.5)
+            ax_t.text(0.99, y, f"{pct:.0f}", transform=ax_t.transAxes,
+                      ha="right", va="top", color=plt.cm.RdYlGn(c2/max(a,1)),
+                      fontsize=8.5, weight="bold")
+
+    fig.savefig(f"{out_dir}/01_passing_network_{game_id}.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 01_passing_network_{game_id}.png")
+
+
+
+
+# PER GAME PRESS MAP #
+
+def plot_press_map(df, game_id, out_dir):
+    meta = GAME_META[game_id]; opp = meta["opponent"]
+    df = df[~df["is_pen_shootout"]]
+
+    dp = df[~df["is_france"] & df["pressureType"].isin(["P","A"]) & df["ball_x"].notna()]
+    fp = df[ df["is_france"] & df["pressureType"].isin(["P","A"]) & df["ball_x"].notna()]
+
+    fig, axes = plt.subplots(1,2, figsize=(20,8), facecolor="#1a1a1a")
+    for ax, data, full, title, sub in [
+        (axes[0], dp, dp[dp["pressureType"]=="P"],
+         f"{opp} Pressure on France\n(France in possession)",
+         f"Where France were pressured by {opp}"),
+        (axes[1], fp, fp[fp["pressureType"]=="P"],
+         f"France Pressure on {opp}\n({opp} in possession)",
+         f"Where France pressed {opp}"),
+    ]:
+        draw_pitch(ax)
+        xs, ys = data["ball_x"].values, data["ball_y"].values
+        if len(xs):
+            if len(xs) > 0:
+                ax.hist2d(xs, ys, bins=[26, 17], cmap="hot", alpha=0.70,
+                          range=[[-52.5,52.5],[-34,34]], zorder=2)
+        ax.scatter(full["ball_x"], full["ball_y"], c="cyan", s=20,
+                   alpha=0.55, zorder=4, label=f"Pressured (n={len(full)})")
+        ax.legend(facecolor="#333", labelcolor="white", fontsize=8, loc="upper left")
+        ax.set_title(title, color="white", fontsize=11, weight="bold", pad=6)
+        ax.text(0, 38, sub, ha="center", color="#aaaaaa", fontsize=8)
+
+    sm = ScalarMappable(cmap="hot"); sm.set_array([])
+    cb = fig.colorbar(sm, ax=axes, fraction=0.015, pad=0.02)
+    cb.set_label("Pressure density", color="white", fontsize=9)
+    plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
+    cb.ax.yaxis.set_tick_params(color="white")
+    fig.suptitle(f"Pressure Maps — {meta['stage']}: {meta['label']}  |  France attacks →",
+                 color="white", fontsize=13, weight="bold", y=1.02)
+    fig.savefig(f"{out_dir}/02_press_map_{game_id}.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 02_press_map_{game_id}.png")
+
+
+
+
+# PER GAME # LINES BROKEN#
+LINE_COLORS = {
+    "D":   ("#ff4444","Defense only"),   "M":  ("#ffaa00","Midfield only"),
+    "MD":  ("#ff6600","Mid+Defense"),    "A":  ("#44ff44","Attack only"),
+    "AM":  ("#00ffaa","Attack+Mid"),     "AD": ("#ff00ff","Attack+Defense"),
+    "AMD": ("#ffffff","All three lines"),
+}
+
+def plot_lines_broken(df, game_id, out_dir):
+    meta = GAME_META[game_id]; opp = meta["opponent"]
+    df = df[~df["is_pen_shootout"]]
+
+    fla = df[ df["is_france"] & df["linesBroken"].notna() & df["ball_x"].notna()].copy()
+    ola = df[~df["is_france"] & df["linesBroken"].notna() & df["ball_x"].notna()].copy()
+    ola[["ball_x","ball_y","end_x","end_y"]] *= -1
+
+    fig, axes = plt.subplots(1,2, figsize=(18,7), facecolor="#1a1a1a")
+    for ax, data, title, arrow in [
+        (axes[0], fla, "France Line-Breaking Events",  "France attack →"),
+        (axes[1], ola, f"{opp} Line-Breaking Events",  f"{opp} attack →"),
+    ]:
+        draw_pitch(ax, attack_label=arrow); patches = []
+        for lt, (col, label) in LINE_COLORS.items():
+            sub = data[data["linesBroken"]==lt]
+            if sub.empty: continue
+            for _, row in sub.iterrows():
+                x1,y1 = row["ball_x"], row["ball_y"]
+                x2,y2 = row["end_x"],  row["end_y"]
+                if pd.isna(x2) or pd.isna(y2):
+                    ax.scatter(x1,y1, c=col, s=70, alpha=0.85, zorder=4)
+                else:
+                    ax.scatter(x1,y1, c=col, s=35, alpha=0.9, zorder=5)
+                    ax.annotate("", xy=(x2,y2), xytext=(x1,y1),
+                                arrowprops=dict(arrowstyle="-|>", color=col,
+                                               lw=1.4, mutation_scale=10, alpha=0.75))
+            patches.append(mpatches.Patch(color=col, label=f"{label} (n={len(sub)})"))
+        ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+                  fontsize=8, loc="upper left", framealpha=0.8)
+        ax.set_title(title, color="white", fontsize=12, weight="bold", pad=8)
+
+    fig.suptitle(f"Line-Breaking Events — {meta['stage']}: {meta['label']}",
+                 color="white", fontsize=14, weight="bold", y=1.02)
+    fig.savefig(f"{out_dir}/03_lines_broken_{game_id}.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 03_lines_broken_{game_id}.png")
+
+
+
+
+# PER GAME CHANCE CREATION#
+def plot_chance_creation(df, game_id, out_dir):
+    meta = GAME_META[game_id]; opp = meta["opponent"]
+    df = df[~df["is_pen_shootout"]]
+
+    fra_pos = df[df["opportunityType"].isin(["C","H","D"]) & df["is_france"]
+                 & df["ball_x"].notna() & (df["ball_x"]>=0)].copy()
+    opp_pos = df[df["opportunityType"].isin(["C","H","D"]) & ~df["is_france"]
+                 & df["ball_x"].notna() & (df["ball_x"]<=0)].copy()
+    goals = df[df["shotOutcome"]=="G"].copy()
+
+    fig, ax = plt.subplots(figsize=(18,11), facecolor="#1a1a1a")
+    draw_pitch(ax); patches = []
+
+    LS = {"PA":"-","CR":"--","CH":":","CL":"-."}
+    SZ = {"C":300,"H":150,"D":80}
+    MK = {"C":"*","H":"o","D":"o"}
+
+    def draw_arrows(sub, col, aa=0.6, ad=0.9):
+        for _, row in sub.iterrows():
+            x1,y1 = row["ball_x"], row["ball_y"]
+            x2 = row["end_x"] if pd.notna(row.get("end_x")) else x1
+            y2 = row["end_y"] if pd.notna(row.get("end_y")) else y1
+            ot = row["opportunityType"]
+            ax.annotate("", xy=(x2,y2), xytext=(x1,y1),
+                        arrowprops=dict(arrowstyle="-|>", color=col, lw=1.3,
+                                        linestyle=LS.get(row.get("possEventType","PA"),"-"),
+                                        mutation_scale=10, alpha=aa), zorder=4)
+            ax.scatter(x1,y1, c=col, s=20, alpha=0.45, zorder=5, edgecolors="none")
+            ax.scatter(x2,y2, c=col, s=SZ.get(ot,80), marker=MK.get(ot,"o"),
+                       alpha=ad, zorder=6,
+                       edgecolors="white" if ot=="C" else "none",
+                       linewidths=1.2 if ot=="C" else 0)
+
+    for ot, col, lbl in [("C","#ff3333","FRA Chance"),("H","#ff8800","FRA Half Chance"),("D","#ffff00","FRA Dangerous")]:
+        sub = fra_pos[fra_pos["opportunityType"]==ot]
+        if sub.empty: continue
+        draw_arrows(sub, col)
+        patches.append(mpatches.Patch(color=col, label=f"{lbl} (n={len(sub)})"))
+
+    for ot, col, lbl in [("C","#cc00cc","OPP Chance"),("H","#9933ff","OPP Half Chance"),("D","#4488ff","OPP Dangerous")]:
+        sub = opp_pos[opp_pos["opportunityType"]==ot]
+        if sub.empty: continue
+        draw_arrows(sub, col)
+        patches.append(mpatches.Patch(color=col, label=f"{lbl} (n={len(sub)})"))
+
+    for _, g in goals.iterrows():
+        gx, gy = g["ball_x"], g["ball_y"]
+        col = "#00ff00" if g["is_france"] else "#ff4444"
+        ax.scatter(gx, gy, c=col, s=500, marker="*", zorder=8,
+                   edgecolors="white", linewidths=1.5)
+        name = SHORT_NAME.get(g["shooter"], (g["shooter"] or "").split()[-1])
+        ax.text(gx, gy+3.5, f"GOAL: {name}", ha="center", fontsize=8,
+                color="white", weight="bold", zorder=9)
+
+    patches += [mpatches.Patch(color="#00ff00", label="France Goal"),
+                mpatches.Patch(color="#ff4444", label=f"{opp} Goal")]
+    leg = ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+                    fontsize=8, loc="upper left", framealpha=0.85, ncol=2,
+                    title="Opportunity Level", title_fontsize=8)
+    leg.get_title().set_color("white")
+
+    title = (f"Chance Creation & Goal Map — {meta['stage']}: {meta['label']}\n"
+             f"France attacks → | Warm=France benefit | Cool={opp} benefit")
+    if game_id == "10517":
+        title += "\n(Penalty shootout excluded)"
+    ax.set_title(title, color="white", fontsize=11, weight="bold", pad=10)
+
+    fig.savefig(f"{out_dir}/04_chance_creation_{game_id}.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 04_chance_creation_{game_id}.png")
+
+
+
+
+# PER GAME SHOT MAP#
+def plot_shot_map(df, game_id, out_dir):
+    meta = GAME_META[game_id]; opp = meta["opponent"]
+    # exclude penalty shootout
+    df = df[~df["is_pen_shootout"]]
+
+    shots = df[(df["possEventType"]=="SH") & df["shooter"].notna()].copy()
+    fra   = shots[shots["is_france"]].copy()
+    opp_s = shots[~shots["is_france"]].copy()
+    opp_s[["ball_x","ball_y"]] *= -1
+
+    OSTYLE = {"goal":("#00ee44","*",700,2.0), "on_target":("#44aaff","o",280,1.3),
+              "blocked":("#ffaa00","D",220,1.0), "off_target":("#ff4444","X",220,0.8)}
+    RLBL   = {"goal":"GOAL","on_target":"On Target","blocked":"Blocked","off_target":"Off Target"}
+    RCOL   = {"goal":"#00ee44","on_target":"#44aaff","blocked":"#ffaa00","off_target":"#ff4444"}
+    BODY   = {"R":"Right","L":"Left","HE":"Header","RT":"R.Thigh","LT":"L.Thigh"}
+    SNAT   = {"P":"Power","A":"Accurate","F":"Flick","T":"Toe"}
+    PLBL   = {"P":"Pressured","A":"Press Att.","L":"Lane","N":"Free"}
+
+    def og(o):
+        if o=="G": return "goal"
+        if o in ("S","F"): return "on_target"
+        if o=="B": return "blocked"
+        return "off_target"
+
+    def _draw(tdf, tlabel, fname):
+        fig = plt.figure(figsize=(26,10), facecolor="#1a1a1a")
+        gs  = fig.add_gridspec(1,2, width_ratios=[1,1.3], wspace=0.06,
+                               left=0.01, right=0.99, top=0.88, bottom=0.04)
+        ax_p = fig.add_subplot(gs[0,0]); ax_t = fig.add_subplot(gs[0,1])
+        draw_attacking_half(ax_p)
+
+        for _, s in tdf.iterrows():
+            bx, by = s["ball_x"], s["ball_y"]
+            if pd.isna(bx) or pd.isna(by): continue
+            col, mk, sz, lw = OSTYLE[og(s["shotOutcome"])]
+            ax_p.scatter(bx, by, c=col, s=sz, marker=mk, zorder=6,
+                         alpha=0.93, edgecolors="white", linewidths=lw)
+            pl = (s.get("shooter") or "").split()[-1]
+            oy = 1.8 if by >= 0 else -1.8
+            ax_p.text(bx, by+oy, f"{pl}\n{s.get('formattedClock','')}",
+                      fontsize=6, color="white", alpha=0.75, ha="center",
+                      va="bottom" if by>=0 else "top", zorder=7)
+
+        n  = len(tdf)
+        g  = len(tdf[tdf["shotOutcome"]=="G"])
+        on = len(tdf[tdf["shotOutcome"].isin(["S","F"])])
+        bl = len(tdf[tdf["shotOutcome"]=="B"])
+        off= n - g - on - bl
+        pr = len(tdf[tdf["pressureType"]=="P"])
+        pen_note = "\n(Penalty shootout excluded)" if game_id=="10517" else ""
+        ax_p.set_title(
+            f"{tlabel} — {n} shots | {g} goals | {on} on target | "
+            f"{bl} blocked | {off} off{pen_note}\nUnder pressure: {pr}/{n}",
+            color="white", fontsize=11, weight="bold", pad=8)
+
+        ax_t.set_facecolor("#1a1a1a"); ax_t.axis("off")
+        sdf = tdf.sort_values("startGameClock").reset_index(drop=True)
+        col_h = ["#","Time","Player","Body","Nature","Pressure","Result"]
+        col_w = [0.03, 0.08, 0.18, 0.12, 0.12, 0.13, 0.11]
+        xs = []; cx = 0.0
+        for w in col_w: xs.append(cx); cx += w
+        hy = 0.97; rh = 0.88 / max(len(sdf)+1, 1)
+        for hdr, x in zip(col_h, xs):
+            ax_t.text(x, hy, hdr, transform=ax_t.transAxes, fontsize=9,
+                      color="white", weight="bold", va="top", ha="left",
+                      fontfamily="monospace")
+        ax_t.plot([0,1],[hy-0.02,hy-0.02], color="#555", lw=1,
+                  transform=ax_t.transAxes)
+        for ri, (_, s) in enumerate(sdf.iterrows()):
+            y = hy - 0.04 - ri*rh
+            grp = og(s["shotOutcome"]); rc = RCOL[grp]; rl = RLBL[grp]
+            body  = BODY.get(s.get("bodyType",""),  s.get("bodyType","")  or "")
+            snat  = SNAT.get(s.get("shotNature",""), s.get("shotNature","") or "")
+            press = PLBL.get(s.get("pressureType",""), "—")
+            bg = "#222222" if ri%2==0 else "#1a1a1a"
+            ax_t.add_patch(plt.Rectangle((0,y-rh*0.85), 1, rh*0.92,
+                           transform=ax_t.transAxes, facecolor=bg,
+                           edgecolor="none", zorder=0))
+            vals = [str(ri+1), s.get("formattedClock",""),
+                    s.get("shooter",""), body, snat, press, rl]
+            for ci, (val, x) in enumerate(zip(vals, xs)):
+                ax_t.text(x, y, val, transform=ax_t.transAxes,
+                          fontsize=8.5, va="top", ha="left",
+                          fontfamily="monospace",
+                          color=rc if ci==len(vals)-1 else "white",
+                          weight="bold" if ci==len(vals)-1 else "normal",
+                          zorder=1)
+        ax_t.set_xlim(0,1); ax_t.set_ylim(0,1)
+
+        legend_els = [
+            Line2D([0],[0],lw=0,marker="*",markersize=14,
+                   markerfacecolor="#00ee44",markeredgecolor="white",
+                   markeredgewidth=1.5,label="Goal"),
+            Line2D([0],[0],lw=0,marker="o",markersize=11,
+                   markerfacecolor="#44aaff",markeredgecolor="white",
+                   markeredgewidth=1.2,label="On Target (Saved)"),
+            Line2D([0],[0],lw=0,marker="D",markersize=10,
+                   markerfacecolor="#ffaa00",markeredgecolor="white",
+                   markeredgewidth=1.0,label="Blocked"),
+            Line2D([0],[0],lw=0,marker="X",markersize=10,
+                   markerfacecolor="#ff4444",markeredgecolor="white",
+                   markeredgewidth=0.8,label="Off Target"),
+        ]
+        fig.legend(handles=legend_els, facecolor="#2a2a2a", labelcolor="white",
+                   fontsize=11, loc="upper center", ncol=4, framealpha=0.9,
+                   bbox_to_anchor=(0.5,0.995), edgecolor="#444444")
+        fig.suptitle(f"Shot Map — {tlabel}  |  {meta['stage']}: {meta['label']}",
+                     color="white", fontsize=14, weight="bold", y=1.01)
+        fig.savefig(fname, dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+        plt.close()
+
+    if not fra.empty:
+        _draw(fra, "France", f"{out_dir}/05a_shot_map_france_{game_id}.png")
+        print(f"  -> 05a_shot_map_france_{game_id}.png")
+    if not opp_s.empty:
+        _draw(opp_s, opp, f"{out_dir}/05b_shot_map_opponent_{game_id}.png")
+        print(f"  -> 05b_shot_map_opponent_{game_id}.png")
+
+
+
+
+# ═PER GAME PLAYER GRADES
+def plot_player_grades(df, game_id, out_dir):
+    meta = GAME_META[game_id]
+    df = df[~df["is_pen_shootout"]]
+
+    GMAP = {
+        "passerGrade":"passer","receiverGrade":"receiver","targetGrade":"target",
+        "shooterGrade":"shooter","dribbleGrade":"dribbler",
+        "challengerGrade":"challenger","carrierGrade":"carrier",
+        "ballCarrierGrade":"ballCarrier",
+    }
+    grade_rows = []
+    for _, row in df[df["is_france"]].iterrows():
+        for gc, pc in GMAP.items():
+            g = row.get(gc); p = row.get(pc)
+            if pd.isna(g) or not p or p not in FRANCE_PLAYERS: continue
+            grade_rows.append({"player": p, "grade": float(g)})
+    if not grade_rows: print("  No grade data"); return
+
+    gdf = pd.DataFrame(grade_rows)
+    summary = (gdf.groupby("player")
+                  .agg(avg_grade=("grade","mean"), n=("grade","count"))
+                  .reset_index()
+                  .sort_values("avg_grade", ascending=True))
+
+    outliers = summary[summary["n"] < 10]["player"].tolist()
+    fig, ax  = plt.subplots(figsize=(13, max(7, len(summary)*0.6+2)),
+                            facecolor="#1a1a1a")
+    ax.set_facecolor("#1a1a1a")
+    colors = ["#ff4444" if g<-0.005 else "#44ff44" if g>0.005 else "#888888"
+              for g in summary["avg_grade"]]
+    bars = ax.barh(range(len(summary)), summary["avg_grade"],
+                   color=colors, alpha=0.85, edgecolor="#555",
+                   linewidth=0.5, height=0.65)
+
+    ylabels = [row["player"] + (" ⚠" if row["player"] in outliers else "")
+               for _, row in summary.iterrows()]
+    ax.set_yticks(range(len(summary)))
+    ax.set_yticklabels(ylabels, fontsize=10, color="white")
+    ax.set_ylim(-0.7, len(summary)-0.3)
+    xmax = summary["avg_grade"].abs().max()
+    ax.set_xlim(-xmax*1.6, xmax*1.6)
+    ax.axvline(0, color="white", lw=1.2, alpha=0.7)
+
+    for bar, (_, row) in zip(bars, summary.iterrows()):
+        x = bar.get_width()
+        offset = xmax*0.04 if x >= 0 else -xmax*0.04
+        ax.text(x+offset, bar.get_y()+bar.get_height()/2,
+                f"{row['avg_grade']:+.3f}  (n={int(row['n'])})",
+                va="center", ha="left" if x>=0 else "right",
+                color="white", fontsize=9)
+
+    if outliers:
+        ax.text(0.99, 0.01, "⚠ = fewer than 10 grade obs — treat with caution",
+                transform=ax.transAxes, ha="right", va="bottom",
+                color="#ffaa00", fontsize=8, style="italic")
+
+    ax.set_xlabel("Average PFF Grade  (−2 to +2,  0=expected)",
+                  color="white", fontsize=10)
+    ax.set_title(f"France Player Grades — {meta['stage']}: {meta['label']}",
+                 color="white", fontsize=12, weight="bold", pad=12)
+    ax.tick_params(colors="white")
+    plt.setp(ax.get_xticklabels(), color="white")
+    for spine in ax.spines.values(): spine.set_edgecolor("#555")
+
+    patches = [mpatches.Patch(color="#44ff44", label="Above expected"),
+               mpatches.Patch(color="#888888", label="Expected (~0)"),
+               mpatches.Patch(color="#ff4444", label="Below expected")]
+    ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+              fontsize=9, loc="lower right")
+    plt.tight_layout()
+    fig.savefig(f"{out_dir}/06_player_grades_{game_id}.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 06_player_grades_{game_id}.png")
+
+
+
+
+# MBAPPE PASSES AND SHOTS
+def plot_mbappe_passes_shots(df, game_id, out_dir):
+    meta = GAME_META[game_id]
+    df = df[~df["is_pen_shootout"]]
+
+    mp = df[(df["passer"]=="Kylian Mbappé") & (df["possEventType"]=="PA")
+            & df["ball_x"].notna() & df["passOutcome"].notna()].copy()
+    ms = df[(df["shooter"]=="Kylian Mbappé") & df["ball_x"].notna()].copy()
+    if mp.empty and ms.empty: print("  No Mbappé data"); return
+
+    fig, axes = plt.subplots(1,2, figsize=(22,8), facecolor="#1a1a1a")
+
+    ax = axes[0]; draw_pitch(ax)
+    comp = mp[mp["passOutcome"]=="C"]; inc = mp[mp["passOutcome"]!="C"]
+    ax.scatter(comp["ball_x"], comp["ball_y"], c="#44ff44", s=100, alpha=0.85,
+               zorder=4, edgecolors="#333", linewidths=0.5,
+               label=f"Completed (n={len(comp)})")
+    ax.scatter(inc["ball_x"],  inc["ball_y"],  c="#ff4444", s=100, alpha=0.85,
+               zorder=4, edgecolors="#333", linewidths=0.5, marker="X",
+               label=f"Incomplete (n={len(inc)})")
+    pct = 100*len(comp)//max(len(mp),1)
+    ax.legend(facecolor="#333", labelcolor="white", fontsize=9,
+              loc="upper left", framealpha=0.8)
+    ax.set_title(f"Mbappé Pass Map — {meta['stage']}: {meta['label']}\n"
+                 f"({len(mp)} passes | {pct}% completion)",
+                 color="white", fontsize=12, weight="bold", pad=8)
+
+    ax2 = axes[1]; draw_pitch(ax2)
+    SC = {"G":("#44ff44","Goal","*"), "S":("#ffaa00","Saved","o"),
+          "B":("#4488ff","Blocked","o"), "O":("#ff4444","Off Target","X"),
+          "F":("#ff4444","Off Target","X"), "C":("#ffaa00","Saved","o")}
+    shot_patches = []; plotted = set()
+    for oc, (col, lbl, mk) in SC.items():
+        sub = ms[ms["shotOutcome"]==oc]
+        if sub.empty: continue
+        ax2.scatter(sub["ball_x"], sub["ball_y"], c=col,
+                    s=300 if oc=="G" else 150, marker=mk, alpha=0.9, zorder=4,
+                    edgecolors="white" if oc=="G" else "#333",
+                    linewidths=1.5 if oc=="G" else 0.5)
+        if lbl not in plotted:
+            shot_patches.append(mpatches.Patch(color=col,
+                                               label=f"{lbl} (n={len(sub)})")); plotted.add(lbl)
+    for _, row in ms.iterrows():
+        st = {"V":"Volley","F":"Foot","S":"Standard"}.get(row.get("shotType",""),
+                                                          row.get("shotType","") or "")
+        sn = {"P":"Power","A":"Accurate","F":"Flick"}.get(row.get("shotNature",""),
+                                                          row.get("shotNature","") or "")
+        ax2.text(row["ball_x"], row["ball_y"]+2, f"{row['formattedClock']}\n{st}|{sn}",
+                 ha="center", fontsize=7, color="white", alpha=0.85,
+                 bbox=dict(facecolor="#1a1a1a", edgecolor="none", alpha=0.5, pad=1))
+    ng = len(ms[ms["shotOutcome"]=="G"])
+    ax2.legend(handles=shot_patches, facecolor="#333", labelcolor="white",
+               fontsize=9, loc="upper left", framealpha=0.8)
+    pen_note = "\n(Penalty shootout excluded)" if game_id=="10517" else ""
+    ax2.set_title(f"Mbappé Shots — {meta['stage']}: {meta['label']}{pen_note}\n"
+                  f"({len(ms)} shots | {ng} goal(s))",
+                  color="white", fontsize=12, weight="bold", pad=8)
+
+    fig.suptitle(f"Mbappé — Passes & Shots  |  {meta['stage']}: {meta['label']}",
+                 color="white", fontsize=14, weight="bold", y=1.01)
+    plt.tight_layout()
+    fig.savefig(f"{out_dir}/07_mbappe_passes_shots_{game_id}.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 07_mbappe_passes_shots_{game_id}.png")
+
+
+
+
+# MBAPPE DEFENDER DISTANCE
+def plot_mbappe_event_analysis(df, game_id, out_dir, france_is_home):
+    meta = GAME_META[game_id]; MBAPPE_J = "10"
+    fe = df[df["is_france"] & ~df["is_pen_shootout"]].copy()
+
+    dists, jerseys, mxs, mys = [], [], [], []
+    for _, row in fe.iterrows():
+        hp = row["_home_players"]; ap = row["_away_players"]
+        mb = hp.get(MBAPPE_J) if france_is_home else ap.get(MBAPPE_J)
+        defenders = ap if france_is_home else hp
+        if not mb: continue
+        period = str(row.get("period",""))
+        mx = mb.get("x",0); my = mb.get("y",0)
+        if period=="2": mx,my = -mx,-my
+        if not france_is_home: mx,my = -mx,-my
+
+        min_d, min_j = 999, None
+        for jnum, p in defenders.items():
+            ax_ = p.get("x",0); ay_ = p.get("y",0)
+            if period=="2": ax_,ay_ = -ax_,-ay_
+            if not france_is_home: ax_,ay_ = -ax_,-ay_
+            d = np.sqrt((mx-ax_)**2+(my-ay_)**2)
+            if d < min_d: min_d = d; min_j = jnum
+        dists.append(min_d); jerseys.append(min_j)
+        mxs.append(mx); mys.append(my)
+
+    if not dists: print("  No Mbappé defender data"); return
+    mdf = pd.DataFrame({"dist":dists,"jersey":jerseys,"x":mxs,"y":mys})
+
+    fig, axes = plt.subplots(1,2, figsize=(16,7), facecolor="#1a1a1a")
+    ax = axes[0]; draw_pitch(ax)
+    sc = ax.scatter(mdf["x"], mdf["y"], c=mdf["dist"], cmap="RdYlGn",
+                    vmin=0, vmax=20, s=15, alpha=0.6, zorder=4)
+    cb = fig.colorbar(sc, ax=ax, fraction=0.025, pad=0.02)
+    cb.set_label("Distance to closest defender (m)", color="white", fontsize=9)
+    plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
+    cb.ax.yaxis.set_tick_params(color="white")
+    pct_t = 100*(mdf["dist"]<=5).mean()
+    ax.set_title(f"Mbappé Position × Defender Distance\n"
+                 f"{meta['stage']}: {meta['label']}\n"
+                 f"Mean {mdf['dist'].mean():.1f}m  |  Within 5m: {pct_t:.1f}%",
+                 color="white", fontsize=11, weight="bold")
+
+    ax2 = axes[1]; ax2.set_facecolor("#1a1a1a")
+    jc = Counter(jerseys)
+    top_j = sorted(jc.items(), key=lambda x: x[1], reverse=True)[:10]
+    lbls  = [f"#{j}" for j,_ in top_j]; cnts = [c for _,c in top_j]
+    total = sum(jc.values())
+    bars = ax2.barh(lbls[::-1], cnts[::-1], color="#1f77b4",
+                    alpha=0.85, edgecolor="#555", linewidth=0.5)
+    for bar, cnt in zip(bars, cnts[::-1]):
+        ax2.text(bar.get_width()+1, bar.get_y()+bar.get_height()/2,
+                 f"{100*cnt/total:.1f}%", va="center", color="white", fontsize=9)
+    ax2.set_xlabel("Events as closest defender", color="white", fontsize=10)
+    ax2.set_title(f"Who Marked Mbappé Most?\n{meta['stage']}: {meta['label']}",
+                  color="white", fontsize=11, weight="bold")
+    ax2.tick_params(colors="white")
+    plt.setp(ax2.get_yticklabels(), color="white", fontsize=9)
+    plt.setp(ax2.get_xticklabels(), color="white")
+    for spine in ax2.spines.values(): spine.set_edgecolor("#555")
+
+    fig.suptitle(f"Mbappé Defensive Attention — {meta['stage']}: {meta['label']}",
+                 color="white", fontsize=13, weight="bold", y=1.01)
+    plt.tight_layout()
+    fig.savefig(f"{out_dir}/08_mbappe_defender_dist_{game_id}.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 08_mbappe_defender_dist_{game_id}.png")
+
+
+
+
+#SET PIECE ANALYSIS#
+def plot_set_pieces(df, game_id, out_dir):
+    meta = GAME_META[game_id]; opp = meta["opponent"]
+    df = df[~df["is_pen_shootout"]]
+
+    SL  = {'C':'Corner','F':'Free Kick','T':'Throw In','G':'Goal Kick','P':'Penalty'}
+    OL  = {'C':'Complete','D':'Intercepted','O':'Out of Play',
+           'B':'Blocked','S':'Stoppage','G':'Goal','I':'Shot at Goal'}
+    AL  = {'C':'Chance','H':'Half Chance','D':'Dangerous',
+           'N':'Neg Chance','P':'Neg Dangerous'}
+    SPC = {'C':'#ff6600','F':'#44aaff','T':'#ffff00','G':'#aaaaaa','P':'#ff3333'}
+    OPC = {'C':'#ff3333','H':'#ff8800','D':'#ffff00','N':'#4488ff','P':'#9933ff'}
+    CT  = {'I':'Inswinger','O':'Outswinger','D':'Drilled','F':'Floated','P':'Placed'}
+
+    sp_df  = df[df["setpieceType"].notna() & (df["setpieceType"]!="O") &
+                (df["setpieceType"]!="K")].copy()
+    fra_sp = sp_df[ sp_df["is_france"]].copy()
+    opp_sp = sp_df[~sp_df["is_france"]].copy()
+    opp_sp[["ball_x","ball_y","end_x","end_y"]] *= -1
+
+    fig = plt.figure(figsize=(26,16), facecolor="#1a1a1a")
+    gs  = fig.add_gridspec(2,3, width_ratios=[1.2,1,1], hspace=0.28,
+                           wspace=0.12, left=0.03, right=0.97,
+                           top=0.92, bottom=0.04)
+
+    for row_i, (team_df, team_label) in enumerate([(fra_sp,"France"),(opp_sp,opp)]):
+        ax_m = fig.add_subplot(gs[row_i,0])
+        draw_pitch(ax_m, attack_label="attack →")
+        for sp_type, colour in SPC.items():
+            sub = team_df[(team_df["setpieceType"]==sp_type) & team_df["ball_x"].notna()]
+            if sub.empty: continue
+            ax_m.scatter(sub["ball_x"], sub["ball_y"], c=colour, s=120, zorder=5,
+                         alpha=0.85, edgecolors="white", linewidths=0.8,
+                         label=f"{SL.get(sp_type,sp_type)} (n={len(sub)})")
+        for _, row in team_df[team_df["opportunityType"].notna() & team_df["ball_x"].notna()].iterrows():
+            ax_m.scatter(row["ball_x"], row["ball_y"],
+                         c=OPC.get(row["opportunityType"],"#fff"),
+                         s=300, marker="*", zorder=7, edgecolors="white", linewidths=1.2)
+        ax_m.legend(facecolor="#333", labelcolor="white", fontsize=7.5,
+                    loc="upper left", framealpha=0.85)
+        ax_m.set_title(f"{team_label} — Set Piece Locations",
+                       color="white", fontsize=10, weight="bold", pad=6)
+
+        ax_b = fig.add_subplot(gs[row_i,1]); ax_b.set_facecolor("#1a1a1a")
+        type_out = {}
+        for sp_type in ['C','F','T','G']:
+            sub = team_df[team_df["setpieceType"]==sp_type]
+            if sub.empty: continue
+            outcomes = Counter()
+            for _, row in sub.iterrows():
+                o = row.get("passOutcome") or row.get("crossOutcome") or "?"
+                outcomes[OL.get(o,o)] += 1
+            type_out[SL.get(sp_type,sp_type)] = outcomes
+        if type_out:
+            all_oc = ['Complete','Blocked','Intercepted','Out of Play','Stoppage','Shot at Goal']
+            oc_c   = ['#44ff44','#ffaa00','#ff4444','#aaaaaa','#4488ff','#ff00ff']
+            ys = list(type_out.keys()); bots = [0]*len(ys)
+            for oc, occ in zip(all_oc, oc_c):
+                vals = [type_out[y].get(oc,0) for y in ys]
+                if sum(vals)==0: continue
+                ax_b.barh(ys, vals, left=bots, color=occ, alpha=0.85,
+                          edgecolor="#333", linewidth=0.5, label=oc)
+                for yi,(v,b) in enumerate(zip(vals,bots)):
+                    if v>0: ax_b.text(b+v/2, yi, str(v), ha='center',
+                                      va='center', fontsize=8, color='white', weight='bold')
+                bots = [b+v for b,v in zip(bots,vals)]
+            ax_b.legend(facecolor="#333", labelcolor="white", fontsize=7,
+                        loc="lower right", framealpha=0.85)
+            ax_b.set_xlabel("Count", color="white", fontsize=9)
+            ax_b.tick_params(colors="white")
+            plt.setp(ax_b.get_xticklabels(), color="white")
+            plt.setp(ax_b.get_yticklabels(), color="white")
+            for spine in ax_b.spines.values(): spine.set_edgecolor("#555")
+        ax_b.set_title(f"{team_label} — Set Piece Outcomes",
+                       color="white", fontsize=10, weight="bold", pad=6)
+
+        ax_t = fig.add_subplot(gs[row_i,2])
+        ax_t.set_facecolor("#1a1a1a"); ax_t.axis("off")
+        sdf = team_df.sort_values("startGameClock").reset_index(drop=True)
+        col_h = ["Time","Type","Event","Outcome","Opportunity"]
+        col_x = [0.0, 0.16, 0.33, 0.52, 0.74]
+        hy = 0.97; rh = 0.88/max(len(sdf),1)
+        for hdr, x in zip(col_h, col_x):
+            ax_t.text(x, hy, hdr, transform=ax_t.transAxes, fontsize=8.5,
+                      color="white", weight="bold", va="top", ha="left",
+                      fontfamily="monospace")
+        ax_t.plot([0,1],[hy-0.02,hy-0.02], color="#555", lw=1,
+                  transform=ax_t.transAxes)
+        for ri, (_, row) in enumerate(sdf.iterrows()):
+            y = hy - 0.04 - ri*rh
+            spt = SL.get(row.get("setpieceType",""),"")
+            evt = row.get("possEventType","")
+            out = row.get("passOutcome") or row.get("crossOutcome") or "—"
+            opt = AL.get(row.get("opportunityType",""),"—")
+            opc = OPC.get(row.get("opportunityType",""),"white")
+            ct  = CT.get(row.get("crossType",""),"")
+            el  = {"PA":"Pass","CR":f"Cross({ct})","SH":"Shot","CL":"Clear"}.get(evt,evt)
+            bg  = "#222222" if ri%2==0 else "#1a1a1a"
+            ax_t.add_patch(plt.Rectangle((0,y-rh*0.85), 1, rh*0.92,
+                           transform=ax_t.transAxes, facecolor=bg,
+                           edgecolor="none", zorder=0))
+            vals  = [row.get("formattedClock",""), spt, el, OL.get(out,out), opt]
+            cols  = ["white","white","white","white", opc]
+            bolds = [False,False,False,False,
+                     row.get("opportunityType") in ['C','H','D']]
+            for val, x, col, bold in zip(vals, col_x, cols, bolds):
+                ax_t.text(x, y, val, transform=ax_t.transAxes, fontsize=7.8,
+                          va="top", ha="left", fontfamily="monospace",
+                          color=col, weight="bold" if bold else "normal", zorder=1)
+        ax_t.set_xlim(0,1); ax_t.set_ylim(0,1)
+        ax_t.set_title(f"{team_label} — Set Piece Detail",
+                       color="white", fontsize=10, weight="bold", pad=6)
+
+    fig.suptitle(f"Set Piece Analysis — {meta['stage']}: {meta['label']}  |  ★=Opportunity",
+                 color="white", fontsize=13, weight="bold", y=0.98)
+    fig.savefig(f"{out_dir}/09_set_pieces_{game_id}.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 09_set_pieces_{game_id}.png")
+
+
+
+
+# SEQUENCE ANALYSIS#
+def plot_sequence_analysis(df, game_id, out_dir):
+    meta = GAME_META[game_id]; opp = meta["opponent"]
+    df = df[~df["is_pen_shootout"]]
+
+    raw_seqs = defaultdict(lambda: {
+        'team':None,'n_events':0,'start_clock':None,
+        'has_shot':False,'has_opp':False,'shot_outcome':None,'setpiece':False,
+    })
+    for _, row in df.iterrows():
+        seq = row.get("sequence")
+        if seq is None or (isinstance(seq, float) and pd.isna(seq)): continue
+        try: seq = int(seq)
+        except: continue
+        s = raw_seqs[seq]
+        s['team'] = row.get("teamName")
+        clock = row.get("startGameClock") or 0
+        if s['start_clock'] is None: s['start_clock'] = clock
+        s['n_events'] += 1
+        if row.get("possEventType")=="SH":
+            s['has_shot'] = True; s['shot_outcome'] = row.get("shotOutcome")
+        if row.get("opportunityType") in ('C','H','D'): s['has_opp'] = True
+        sp = row.get("setpieceType")
+        if sp and sp not in ('O','K'): s['setpiece'] = True
+
+    fra_s = [s for s in raw_seqs.values() if s['team']=='France' and s['start_clock'] is not None]
+    opp_s = [s for s in raw_seqs.values() if s['team'] and s['team']!='France' and s['start_clock'] is not None]
+    if not fra_s or not opp_s: print("  No sequence data"); return
+
+    windows   = [(0,15,'0-15'),(15,30,'15-30'),(30,45,'30-45'),
+                 (45,60,'45-60'),(60,75,'60-75'),(75,200,'75-90+')]
+    win_labels = [w[2] for w in windows]
+
+    def wst(seqs, wins):
+        out = []
+        for ws, we, _ in wins:
+            w = [s for s in seqs if ws*60 <= (s['start_clock'] or 0) < we*60]
+            out.append({'n':len(w),
+                        'shots': sum(1 for s in w if s['has_shot']),
+                        'avg_len': sum(s['n_events'] for s in w)/max(len(w),1)})
+        return out
+
+    fs = wst(fra_s, windows); ds = wst(opp_s, windows)
+    fig = plt.figure(figsize=(22,14), facecolor="#1a1a1a")
+    gs  = fig.add_gridspec(2,3, hspace=0.35, wspace=0.3,
+                           left=0.07, right=0.97, top=0.91, bottom=0.06)
+    x = range(len(win_labels))
+
+    def stax(ax):
+        style_dark_ax(ax)
+        ax.set_xticks(x); ax.set_xticklabels(win_labels, color="white", fontsize=8)
+
+    ax1 = fig.add_subplot(gs[0,0]); stax(ax1)
+    ax1.plot(x,[s['n'] for s in fs],'o-',color="#4488ff",lw=2,ms=7,label="France")
+    ax1.plot(x,[s['n'] for s in ds],'s-',color="#ff4444",lw=2,ms=7,label=opp)
+    ax1.set_ylabel("Sequences",color="white",fontsize=9)
+    ax1.set_title("Sequences per 15-min Window",color="white",fontsize=10,weight="bold")
+    ax1.legend(facecolor="#333",labelcolor="white",fontsize=8)
+
+    ax2 = fig.add_subplot(gs[0,1]); stax(ax2)
+    ax2.bar([xi-0.2 for xi in x],[s['shots'] for s in fs],width=0.38,color="#4488ff",alpha=0.85,label="France")
+    ax2.bar([xi+0.2 for xi in x],[s['shots'] for s in ds],width=0.38,color="#ff4444",alpha=0.85,label=opp)
+    ax2.set_ylabel("Seqs with Shot",color="white",fontsize=9)
+    ax2.set_title("Shot-Ending Sequences",color="white",fontsize=10,weight="bold")
+    ax2.legend(facecolor="#333",labelcolor="white",fontsize=8)
+
+    ax3 = fig.add_subplot(gs[0,2]); stax(ax3)
+    ax3.plot(x,[s['avg_len'] for s in fs],'o-',color="#4488ff",lw=2,ms=7,label="France")
+    ax3.plot(x,[s['avg_len'] for s in ds],'s-',color="#ff4444",lw=2,ms=7,label=opp)
+    ax3.set_ylabel("Avg Events",color="white",fontsize=9)
+    ax3.set_title("Avg Sequence Length",color="white",fontsize=10,weight="bold")
+    ax3.legend(facecolor="#333",labelcolor="white",fontsize=8)
+
+    ax4 = fig.add_subplot(gs[1,0]); style_dark_ax(ax4)
+    fl = [s['n_events'] for s in fra_s]; dl = [s['n_events'] for s in opp_s]
+    bins = range(1, max(max(fl),max(dl))+2, 2)
+    ax4.hist(fl,bins=bins,color="#4488ff",alpha=0.65,density=True,
+             label=f"France (avg {np.mean(fl):.1f})")
+    ax4.hist(dl,bins=bins,color="#ff4444",alpha=0.65,density=True,
+             label=f"{opp} (avg {np.mean(dl):.1f})")
+    ax4.set_xlabel("Events per Sequence",color="white",fontsize=9)
+    ax4.set_ylabel("Density",color="white",fontsize=9)
+    ax4.set_title("Sequence Length Distribution",color="white",fontsize=10,weight="bold")
+    ax4.legend(facecolor="#333",labelcolor="white",fontsize=8)
+
+    ax5 = fig.add_subplot(gs[1,1]); style_dark_ax(ax5)
+    def oc(seqs):
+        g   = sum(1 for s in seqs if s['shot_outcome']=='G')
+        sh  = sum(1 for s in seqs if s['has_shot'] and s['shot_outcome']!='G')
+        opc = sum(1 for s in seqs if s['has_opp'] and not s['has_shot'])
+        oth = len(seqs)-g-sh-opc
+        return [g,sh,opc,oth]
+    foc = oc(fra_s); doc = oc(opp_s)
+    oc_labels  = ['Goal','Shot\n(no goal)','Opp\n(no shot)','No threat']
+    oc_colours = ['#00ee44','#44aaff','#ffff00','#555555']
+    for i,(col,lbl) in enumerate(zip(oc_colours,oc_labels)):
+        fp2 = 100*foc[i]/len(fra_s); dp2 = 100*doc[i]/len(opp_s)
+        ax5.bar(i-0.2,fp2,width=0.38,color=col,alpha=0.85,edgecolor="#333")
+        ax5.bar(i+0.2,dp2,width=0.38,color=col,alpha=0.5,edgecolor="#333",hatch="//")
+        ax5.text(i-0.2,fp2+0.5,f"{fp2:.0f}%",ha='center',fontsize=7.5,color='white')
+        ax5.text(i+0.2,dp2+0.5,f"{dp2:.0f}%",ha='center',fontsize=7.5,color='white')
+    ax5.set_xticks([0,1,2,3]); ax5.set_xticklabels(oc_labels,color="white",fontsize=7.5)
+    ax5.set_ylabel("% of sequences",color="white",fontsize=9)
+    ax5.set_title("Sequence Outcome Breakdown",color="white",fontsize=10,weight="bold")
+    from matplotlib.patches import Patch
+    ax5.legend(handles=[Patch(facecolor='white',alpha=0.85,label='France'),
+                         Patch(facecolor='white',alpha=0.5,hatch='//',label=opp)],
+               facecolor="#333",labelcolor="white",fontsize=8)
+
+    ax6 = fig.add_subplot(gs[1,2]); ax6.set_facecolor("#1a1a1a"); ax6.axis("off")
+    def pct(n,t): return f"{100*n//max(t,1)}%"
+    sum_rows = [
+        ("Metric","France",opp),
+        ("Total sequences",str(len(fra_s)),str(len(opp_s))),
+        ("Avg length",f"{np.mean(fl):.1f}",f"{np.mean(dl):.1f}"),
+        ("Max length",str(max(fl)),str(max(dl))),
+        ("With shot",f"{sum(s['has_shot'] for s in fra_s)} ({pct(sum(s['has_shot'] for s in fra_s),len(fra_s))})",
+                     f"{sum(s['has_shot'] for s in opp_s)} ({pct(sum(s['has_shot'] for s in opp_s),len(opp_s))})"),
+        ("With opp C/H/D",f"{sum(s['has_opp'] for s in fra_s)} ({pct(sum(s['has_opp'] for s in fra_s),len(fra_s))})",
+                          f"{sum(s['has_opp'] for s in opp_s)} ({pct(sum(s['has_opp'] for s in opp_s),len(opp_s))})"),
+        ("Goals",str(sum(1 for s in fra_s if s['shot_outcome']=='G')),
+                 str(sum(1 for s in opp_s if s['shot_outcome']=='G'))),
+        ("Set pieces",str(sum(s['setpiece'] for s in fra_s)),
+                      str(sum(s['setpiece'] for s in opp_s))),
+    ]
+    rh2 = 1.0/len(sum_rows)
+    for ri,(m,fv,dv) in enumerate(sum_rows):
+        y = 1.0-ri*rh2; ih = ri==0
+        bg = "#111111" if ih else ("#222222" if ri%2==0 else "#1a1a1a")
+        ax6.add_patch(plt.Rectangle((0,y-rh2),1,rh2,transform=ax6.transAxes,
+                      facecolor=bg,edgecolor="#444",zorder=0))
+        ax6.text(0.02,y-rh2*0.3,m,transform=ax6.transAxes,fontsize=8.5,
+                 color="white",weight="bold" if ih else "normal",
+                 va="center",fontfamily="monospace")
+        ax6.text(0.52,y-rh2*0.3,fv,transform=ax6.transAxes,fontsize=8.5,
+                 color="#4488ff" if not ih else "white",
+                 weight="bold" if ih else "normal",
+                 va="center",fontfamily="monospace")
+        ax6.text(0.78,y-rh2*0.3,dv,transform=ax6.transAxes,fontsize=8.5,
+                 color="#ff4444" if not ih else "white",
+                 weight="bold" if ih else "normal",
+                 va="center",fontfamily="monospace")
+    ax6.set_xlim(0,1); ax6.set_ylim(0,1)
+    ax6.set_title("Summary Stats",color="white",fontsize=10,weight="bold",pad=6)
+
+    fig.suptitle(f"Sequence & Build-Up Analysis — {meta['stage']}: {meta['label']}",
+                 color="white",fontsize=13,weight="bold",y=0.975)
+    fig.savefig(f"{out_dir}/10_sequence_analysis_{game_id}.png",
+                dpi=150,bbox_inches="tight",facecolor="#1a1a1a"); plt.close()
+    print(f"  -> 10_sequence_analysis_{game_id}.png")
+
+
+
+
+# COMPARATIVE STATS BUILDER
+
+def build_comparative_stats(all_dfs, all_home):
+    GMAP = {"passerGrade":"passer","receiverGrade":"receiver",
+            "shooterGrade":"shooter","dribbleGrade":"dribbler",
+            "challengerGrade":"challenger","carrierGrade":"carrier"}
+    MBAPPE_J = "10"
+    stats = []
+
+    for game_id, df in all_dfs.items():
+        meta = GAME_META[game_id]
+        fih  = all_home[game_id]
+        # drop pen shootout for all comparative stats
+        df = df[~df["is_pen_shootout"]]
+
+        fra_sh  = df[ df["is_france"] & (df["possEventType"]=="SH")]
+        opp_sh  = df[~df["is_france"] & (df["possEventType"]=="SH")]
+        fra_g   = len(fra_sh[fra_sh["shotOutcome"]=="G"])
+        opp_g   = len(opp_sh[opp_sh["shotOutcome"]=="G"])
+
+        fra_pa  = df[df["is_france"] & (df["possEventType"]=="PA") & df["passer"].notna()]
+        fra_cp  = len(fra_pa[fra_pa["passOutcome"]=="C"])
+
+        fra_pr  = df[ df["is_france"] & df["pressureType"].isin(["P","A"])]
+        opp_pr  = df[~df["is_france"] & df["pressureType"].isin(["P","A"])]
+        fra_lb  = df[ df["is_france"] & df["linesBroken"].notna()]
+        opp_lb  = df[~df["is_france"] & df["linesBroken"].notna()]
+        fra_ch  = df[ df["is_france"] & df["opportunityType"].isin(["C","H","D"])]
+        opp_ch  = df[~df["is_france"] & df["opportunityType"].isin(["C","H","D"])]
+
+        mb_s   = df[df["shooter"]=="Kylian Mbappé"]
+        mb_p   = df[df["passer"]=="Kylian Mbappé"]
+        mb_g   = len(mb_s[mb_s["shotOutcome"]=="G"])
+        mb_pc  = len(mb_p[mb_p["passOutcome"]=="C"])
+
+        gr = [float(row.get(gc)) for _, row in df[df["is_france"]].iterrows()
+              for gc, pc in GMAP.items()
+              if not pd.isna(row.get(gc)) and row.get(pc) in FRANCE_PLAYERS]
+        avg_gr = float(np.mean(gr)) if gr else 0.0
+
+        dists = []
+        for _, row in df[df["is_france"]].iterrows():
+            hp = row["_home_players"]; ap = row["_away_players"]
+            mb = hp.get(MBAPPE_J) if fih else ap.get(MBAPPE_J)
+            defenders = ap if fih else hp
+            if not mb: continue
+            period = str(row.get("period",""))
+            mx = mb.get("x",0); my = mb.get("y",0)
+            if period=="2": mx,my = -mx,-my
+            if not fih: mx,my = -mx,-my
+            min_d = 999
+            for jnum, p in defenders.items():
+                ax_ = p.get("x",0); ay_ = p.get("y",0)
+                if period=="2": ax_,ay_ = -ax_,-ay_
+                if not fih: ax_,ay_ = -ax_,-ay_
+                d = np.sqrt((mx-ax_)**2+(my-ay_)**2)
+                if d < min_d: min_d = d
+            dists.append(min_d)
+
+        stats.append({
+            "game_id":          game_id,
+            "label":            meta["label"],
+            "label_short":      meta["label_short"],
+            "opponent":         meta["opponent"],
+            "stage":            meta["stage"],
+            "result":           meta["result"],
+            "fra_goals":        fra_g,
+            "opp_goals":        opp_g,
+            "fra_shots":        len(fra_sh),
+            "opp_shots":        len(opp_sh),
+            "fra_shot_conv":    100*fra_g/max(len(fra_sh),1),
+            "opp_shot_conv":    100*opp_g/max(len(opp_sh),1),
+            "fra_pass_comp":    100*fra_cp/max(len(fra_pa),1),
+            "fra_pass_total":   len(fra_pa),
+            "fra_press":        len(fra_pr),
+            "opp_press":        len(opp_pr),
+            "fra_lb":           len(fra_lb),
+            "opp_lb":           len(opp_lb),
+            "fra_chances":      len(fra_ch),
+            "opp_chances":      len(opp_ch),
+            "fra_C": len(fra_ch[fra_ch["opportunityType"]=="C"]),
+            "fra_H": len(fra_ch[fra_ch["opportunityType"]=="H"]),
+            "fra_D": len(fra_ch[fra_ch["opportunityType"]=="D"]),
+            "opp_C": len(opp_ch[opp_ch["opportunityType"]=="C"]),
+            "opp_H": len(opp_ch[opp_ch["opportunityType"]=="H"]),
+            "opp_D": len(opp_ch[opp_ch["opportunityType"]=="D"]),
+            "mbappe_shots":     len(mb_s),
+            "mbappe_goals":     mb_g,
+            "mbappe_passes":    len(mb_p),
+            "mbappe_pass_comp": 100*mb_pc/max(len(mb_p),1),
+            "avg_grade":        avg_gr,
+            "mbappe_avg_dist":  float(np.mean(dists)) if dists else 0.0,
+            "mbappe_tight_pct": 100*sum(1 for d in dists if d<=5)/max(len(dists),1),
+        })
+    return pd.DataFrame(stats)
+
+
+
+
+# COMPARATIVE 1 — OVERVIEW DASHBOARD
+
+def plot_comparative_overview(stats_df, out_dir):
+    print("  -> COMP_01 overview...")
+    gids   = GAME_ORDER
+    x      = np.arange(len(gids))
+    df     = stats_df.set_index("game_id").reindex(gids)
+    xlbls  = xtick_labels(gids)
+    rcols  = [RESULT_COLOR[GAME_META[g]["result"]] for g in gids]
+
+    fig = plt.figure(figsize=(26,20), facecolor="#1a1a1a")
+    gs  = fig.add_gridspec(3,3, hspace=0.48, wspace=0.35,
+                           left=0.07, right=0.97, top=0.93, bottom=0.05)
+
+    def stax(ax, title, ylabel=""):
+        style_dark_ax(ax)
+        ax.set_title(title, color="white", fontsize=11, weight="bold", pad=6)
+        ax.set_ylabel(ylabel, color="white", fontsize=9)
+        ax.set_xticks(x)
+        ax.set_xticklabels(xlbls, rotation=25, ha="right", color="white", fontsize=7.5)
+
+    ax1 = fig.add_subplot(gs[0,0])
+    ax1.bar(x-0.2, df["fra_shots"], width=0.38, color="#4488ff", alpha=0.9, label="France")
+    ax1.bar(x+0.2, df["opp_shots"], width=0.38, color="#ff4444", alpha=0.9, label="Opponent")
+    for xi,g in zip(x,gids):
+        ax1.axvspan(xi-0.5,xi+0.5, alpha=0.07, color=RESULT_COLOR[GAME_META[g]["result"]], zorder=0)
+    ax1.legend(facecolor="#333",labelcolor="white",fontsize=9)
+    stax(ax1,"Shots per Game  (pen shootout excluded for ARG)","Shots")
+
+    ax2 = fig.add_subplot(gs[0,1])
+    bars = ax2.bar(x, df["fra_pass_comp"], color=rcols, alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, df["fra_pass_comp"]):
+        ax2.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.3,
+                 f"{val:.0f}%", ha="center", color="white", fontsize=8)
+    ax2.axhline(df["fra_pass_comp"].mean(), color="white", lw=1.2, ls="--", alpha=0.6,
+                label=f"Avg {df['fra_pass_comp'].mean():.1f}%")
+    ax2.legend(facecolor="#333",labelcolor="white",fontsize=9)
+    stax(ax2,"France Pass Completion %","%")
+
+    ax3 = fig.add_subplot(gs[0,2])
+    ax3.bar(x-0.2, df["fra_chances"], width=0.38, color="#4488ff", alpha=0.9, label="France")
+    ax3.bar(x+0.2, df["opp_chances"], width=0.38, color="#ff4444", alpha=0.9, label="Opponent")
+    ax3.legend(facecolor="#333",labelcolor="white",fontsize=9)
+    stax(ax3,"Chances Created (C+H+D)","Count")
+
+    ax4 = fig.add_subplot(gs[1,0])
+    ax4.bar(x-0.2, df["fra_press"], width=0.38, color="#4488ff", alpha=0.9, label="France pressed")
+    ax4.bar(x+0.2, df["opp_press"], width=0.38, color="#ff4444", alpha=0.9, label="Opp pressed")
+    ax4.legend(facecolor="#333",labelcolor="white",fontsize=9)
+    stax(ax4,"Press Events per Game","Events")
+
+    ax5 = fig.add_subplot(gs[1,1])
+    ax5.plot(x, df["fra_lb"], "o-", color="#4488ff", lw=2, ms=8, label="France")
+    ax5.plot(x, df["opp_lb"], "s-", color="#ff4444", lw=2, ms=8, label="Opponent")
+    ax5.fill_between(x, df["fra_lb"], df["opp_lb"], alpha=0.10, color="white")
+    ax5.legend(facecolor="#333",labelcolor="white",fontsize=9)
+    stax(ax5,"Line-Breaking Events","Count")
+
+    ax6 = fig.add_subplot(gs[1,2])
+    gcols = ["#44ff44" if v>0.005 else "#ff4444" if v<-0.005 else "#888"
+             for v in df["avg_grade"]]
+    bars = ax6.bar(x, df["avg_grade"], color=gcols, alpha=0.85, edgecolor="#555")
+    ax6.axhline(0, color="white", lw=1.2, alpha=0.7)
+    for bar,val in zip(bars, df["avg_grade"]):
+        yp = val+0.001 if val>=0 else val-0.004
+        ax6.text(bar.get_x()+bar.get_width()/2, yp, f"{val:+.3f}",
+                 ha="center", color="white", fontsize=7.5)
+    stax(ax6,"France Avg PFF Grade  (pen shootout excluded)","Grade")
+
+    ax7 = fig.add_subplot(gs[2,0])
+    ax7.bar(x-0.2, df["mbappe_shots"], width=0.38, color="#4488ff", alpha=0.9, label="Shots")
+    ax7.bar(x+0.2, df["mbappe_goals"], width=0.38, color="#00ee44", alpha=0.9, label="Goals")
+    for xi,g in zip(x,gids):
+        ax7.axvspan(xi-0.5,xi+0.5, alpha=0.07, color=RESULT_COLOR[GAME_META[g]["result"]], zorder=0)
+    ax7.legend(facecolor="#333",labelcolor="white",fontsize=9)
+    stax(ax7,"Mbappé — Shots & Goals  (pen shootout excluded)","Count")
+
+    ax8 = fig.add_subplot(gs[2,1])
+    cols8 = ["#00ee44" if v>8 else "#ffaa00" if v>5 else "#ff4444"
+             for v in df["mbappe_avg_dist"]]
+    bars = ax8.bar(x, df["mbappe_avg_dist"], color=cols8, alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, df["mbappe_avg_dist"]):
+        ax8.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.05,
+                 f"{val:.1f}m", ha="center", color="white", fontsize=8)
+    ax8.axhline(df["mbappe_avg_dist"].mean(), color="white", lw=1, ls="--", alpha=0.6)
+    stax(ax8,"Mbappé Avg Defender Distance","Metres")
+
+    ax9 = fig.add_subplot(gs[2,2])
+    ax9.plot(x, df["fra_shot_conv"], "o-", color="#4488ff", lw=2, ms=8, label="France %")
+    ax9.plot(x, df["opp_shot_conv"], "s-", color="#ff4444", lw=2, ms=8, label="Opp %")
+    ax9.set_ylim(0,65)
+    ax9.legend(facecolor="#333",labelcolor="white",fontsize=9)
+    stax(ax9,"Shot Conversion %  (Goals/Shots)  — ARG excl. pens","%")
+
+    result_patches = [mpatches.Patch(color=RESULT_COLOR[r],
+                                     label={"W":"Win","D":"Draw","L":"Loss"}[r])
+                      for r in ["W","D","L"]]
+    fig.legend(handles=result_patches, facecolor="#333", labelcolor="white",
+               fontsize=10, loc="upper right", bbox_to_anchor=(0.99,0.99),
+               framealpha=0.9, title="Result", title_fontsize=9)
+    fig.suptitle("France WC 2022 — Tournament Comparative Overview\n"
+                 "All 7 matches | Background shading = match result | "
+                 "ARG penalty shootout excluded from all stats",
+                 color="white", fontsize=15, weight="bold", y=0.975)
+    fig.savefig(f"{out_dir}/COMP_01_overview.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"     -> COMP_01_overview.png")
+
+
+
+
+
+# COMPARATIVE 2 — MBAPPÉ DEEP DIVE
+
+def plot_comparative_mbappe(all_dfs, stats_df, out_dir):
+    print("  -> COMP_02 Mbappé...")
+    gids  = GAME_ORDER
+    x     = np.arange(len(gids))
+    df    = stats_df.set_index("game_id").reindex(gids)
+    xlbls = xtick_labels(gids)
+    rcols = [RESULT_COLOR[GAME_META[g]["result"]] for g in gids]
+
+    fig = plt.figure(figsize=(26,18), facecolor="#1a1a1a")
+    gs  = fig.add_gridspec(3,2, hspace=0.45, wspace=0.30,
+                           left=0.07, right=0.97, top=0.92, bottom=0.05)
+
+    def stax(ax, title, ylabel=""):
+        style_dark_ax(ax)
+        ax.set_title(title, color="white", fontsize=11, weight="bold", pad=6)
+        ax.set_ylabel(ylabel, color="white", fontsize=9)
+        ax.set_xticks(x); ax.set_xticklabels(xlbls, rotation=25, ha="right",
+                                               color="white", fontsize=7.5)
+
+    ax1 = fig.add_subplot(gs[0,0])
+    bars = ax1.bar(x, df["mbappe_pass_comp"], color=rcols, alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, df["mbappe_pass_comp"]):
+        ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.5,
+                 f"{val:.0f}%", ha="center", color="white", fontsize=8)
+    ax1.axhline(df["mbappe_pass_comp"].mean(), color="white", lw=1.2, ls="--", alpha=0.6,
+                label=f"Avg {df['mbappe_pass_comp'].mean():.0f}%")
+    ax1.legend(facecolor="#333",labelcolor="white",fontsize=9)
+    stax(ax1,"Mbappé Pass Completion % per Game","%")
+
+    ax2 = fig.add_subplot(gs[0,1])
+    draw_attacking_half(ax2)
+    game_cols = {"3819":"#ff4444","3834":"#4488ff","3849":"#ffff00",
+                 "10504":"#ff88ff","10513":"#00ffcc","10515":"#ffaa00","10517":"#44ff44"}
+    for g in gids:
+        dg = all_dfs[g][~all_dfs[g]["is_pen_shootout"]]
+        ms = dg[dg["shooter"]=="Kylian Mbappé"]
+        for _, s in ms.iterrows():
+            bx,by = s["ball_x"], s["ball_y"]
+            if pd.isna(bx) or pd.isna(by): continue
+            mk   = "*" if s["shotOutcome"]=="G" else "o"
+            sz   = 250 if s["shotOutcome"]=="G" else 80
+            ax2.scatter(bx, by, c=game_cols[g], s=sz, marker=mk, alpha=0.85,
+                        zorder=5, edgecolors="white" if mk=="*" else "none",
+                        linewidths=1.2)
+    game_patches = [mpatches.Patch(color=game_cols[g],
+                                   label=GAME_META[g]["label_short"]) for g in gids]
+    ax2.legend(handles=game_patches, facecolor="#333", labelcolor="white",
+               fontsize=8, loc="upper left", framealpha=0.85, ncol=2)
+    ax2.set_title("Mbappé Shot Locations — All Games\n(★=Goal, colour=match, pens excluded)",
+                  color="white", fontsize=11, weight="bold", pad=6)
+
+    ax3 = fig.add_subplot(gs[1,0])
+    cols3 = ["#00ee44" if v>8 else "#ffaa00" if v>5 else "#ff4444"
+             for v in df["mbappe_avg_dist"]]
+    bars = ax3.bar(x, df["mbappe_avg_dist"], color=cols3, alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, df["mbappe_avg_dist"]):
+        ax3.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.05,
+                 f"{val:.1f}m", ha="center", color="white", fontsize=8)
+    ax3.axhline(df["mbappe_avg_dist"].mean(), color="white", lw=1, ls="--", alpha=0.6)
+    stax(ax3,"Mbappé Avg Distance to Closest Defender","Metres")
+
+    ax4 = fig.add_subplot(gs[1,1])
+    bars = ax4.bar(x, df["mbappe_tight_pct"], color=rcols, alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, df["mbappe_tight_pct"]):
+        ax4.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.3,
+                 f"{val:.0f}%", ha="center", color="white", fontsize=8)
+    ax4.axhline(df["mbappe_tight_pct"].mean(), color="white", lw=1.2, ls="--", alpha=0.6)
+    stax(ax4,"% Events Where Mbappé Marked Within 5m","%")
+
+    ax5 = fig.add_subplot(gs[2,0])
+    cum = np.cumsum(df["mbappe_goals"].values)
+    ax5.plot(x, cum, "o-", color="#00ee44", lw=2.5, ms=10, zorder=4)
+    for xi,val,g in zip(x,cum,gids):
+        ax5.text(xi, val+0.08, str(int(val)), ha="center", color="white",
+                 fontsize=10, weight="bold")
+        ax5.axvspan(xi-0.5,xi+0.5, alpha=0.07,
+                    color=RESULT_COLOR[GAME_META[g]["result"]], zorder=0)
+    style_dark_ax(ax5)
+    ax5.set_title("Mbappé Cumulative Goals Over Tournament\n(pen shootout excluded — ARG total = 3)",
+                  color="white", fontsize=11, weight="bold", pad=6)
+    ax5.set_ylabel("Goals", color="white", fontsize=9)
+    ax5.set_xticks(x); ax5.set_xticklabels(xlbls, rotation=25, ha="right",
+                                             color="white", fontsize=7.5)
+
+    ax6 = fig.add_subplot(gs[2,1])
+    sot = []
+    for g in gids:
+        dg = all_dfs[g][~all_dfs[g]["is_pen_shootout"]]
+        ms = dg[dg["shooter"]=="Kylian Mbappé"]
+        on = len(ms[ms["shotOutcome"].isin(["G","S","F"])])
+        sot.append(100*on/max(len(ms),1))
+    bars = ax6.bar(x, sot, color=rcols, alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, sot):
+        ax6.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.5,
+                 f"{val:.0f}%", ha="center", color="white", fontsize=8)
+    ax6.axhline(np.mean(sot), color="white", lw=1, ls="--", alpha=0.6)
+    stax(ax6,"Mbappé Shots on Target %","%")
+
+    fig.suptitle("Mbappé — Full Tournament Analysis  |  France WC 2022\n"
+                 "Penalty shootout excluded from all stats",
+                 color="white", fontsize=15, weight="bold", y=0.975)
+    fig.savefig(f"{out_dir}/COMP_02_mbappe_tournament.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"     -> COMP_02_mbappe_tournament.png")
+
+
+
+
+
+# COMPARATIVE 3 — PLAYER GRADE HEATMAP
+
+def plot_comparative_player_grades(all_dfs, out_dir):
+    print("  -> COMP_03 player grades heatmap...")
+    GMAP = {"passerGrade":"passer","receiverGrade":"receiver",
+            "shooterGrade":"shooter","dribbleGrade":"dribbler",
+            "challengerGrade":"challenger","carrierGrade":"carrier"}
+
+    all_players = set()
+    game_pg     = {}
+    game_pn     = {}
+    for game_id in GAME_ORDER:
+        df = all_dfs[game_id][~all_dfs[game_id]["is_pen_shootout"]]
+        gg = defaultdict(list)
+        for _, row in df[df["is_france"]].iterrows():
+            for gc, pc in GMAP.items():
+                g = row.get(gc); p = row.get(pc)
+                if pd.isna(g) or not p or p not in FRANCE_PLAYERS: continue
+                gg[p].append(float(g)); all_players.add(p)
+        game_pg[game_id] = {p: float(np.mean(v)) for p,v in gg.items()}
+        game_pn[game_id] = {p: len(v) for p,v in gg.items()}
+
+    players = sorted(all_players, key=lambda p: -np.nanmean(
+        [game_pg[g].get(p,np.nan) for g in GAME_ORDER]))
+
+    matrix = np.full((len(players), len(GAME_ORDER)), np.nan)
+    n_mat  = np.zeros((len(players), len(GAME_ORDER)), dtype=int)
+    for pi,p in enumerate(players):
+        for gi,g in enumerate(GAME_ORDER):
+            matrix[pi,gi] = game_pg[g].get(p, np.nan)
+            n_mat[pi,gi]  = game_pn[g].get(p, 0)
+
+    game_labels = [f"{GAME_META[g]['label_short']}\n{GAME_META[g]['stage']}"
+                   for g in GAME_ORDER]
+
+    fig, ax = plt.subplots(figsize=(24, max(10, len(players)*0.55+3)),
+                           facecolor="#1a1a1a")
+    ax.set_facecolor("#1a1a1a")
+    im = ax.imshow(matrix, cmap="RdYlGn", vmin=-0.15, vmax=0.15, aspect="auto")
+    cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+    cbar.set_label("Avg PFF Grade", color="white", fontsize=10)
+    plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+
+    ax.set_xticks(range(len(GAME_ORDER)))
+    ax.set_xticklabels(game_labels, rotation=20, ha="right", color="white", fontsize=9)
+    ax.set_yticks(range(len(players)))
+    ax.set_yticklabels(players, color="white", fontsize=10)
+
+    for pi in range(len(players)):
+        for gi in range(len(GAME_ORDER)):
+            v = matrix[pi,gi]; n = n_mat[pi,gi]
+            if not np.isnan(v):
+                tc  = "black" if abs(v) < 0.08 else "white"
+                lbl = f"{v:+.2f}" + (" ⚠" if n < 10 else "")
+                ax.text(gi, pi, lbl, ha="center", va="center",
+                        fontsize=7.5, color=tc, weight="bold")
+            else:
+                ax.text(gi, pi, "—", ha="center", va="center",
+                        fontsize=9, color="#555555")
+
+    for gi, g in enumerate(GAME_ORDER):
+        rc = RESULT_COLOR[GAME_META[g]["result"]]
+        ax.add_patch(plt.Rectangle((gi-0.5,-0.5), 1, 0.45, color=rc, alpha=0.5, zorder=3))
+        ax.text(gi, -0.28, GAME_META[g]["result"], ha="center", va="center",
+                color=rc, fontsize=9, weight="bold")
+
+    ax.set_xlim(-0.5, len(GAME_ORDER)-0.5)
+    ax.set_ylim(-0.75, len(players)-0.3)
+    for spine in ax.spines.values(): spine.set_edgecolor("#555")
+    ax.tick_params(colors="white")
+    ax.set_title("France Player PFF Grades — All 7 WC 2022 Matches\n"
+                 "Red=below expected | Green=above expected | —=no data | "
+                 "⚠=fewer than 10 obs | pen shootout excluded",
+                 color="white", fontsize=13, weight="bold", pad=12)
+    plt.tight_layout()
+    fig.savefig(f"{out_dir}/COMP_03_player_grades_heatmap.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"     -> COMP_03_player_grades_heatmap.png")
+
+
+
+
+
+# COMPARATIVE 4 — PRESSING & TERRITORY
+
+def plot_comparative_pressing(all_dfs, out_dir):
+    print("  -> COMP_04 pressing & territory...")
+    gids  = GAME_ORDER
+    x     = np.arange(len(gids))
+    xlbls = xtick_labels(gids)
+
+    fig, axes = plt.subplots(2,2, figsize=(22,14), facecolor="#1a1a1a")
+    fig.subplots_adjust(hspace=0.42, wspace=0.3, left=0.07, right=0.97,
+                        top=0.92, bottom=0.06)
+
+    def stax(ax, title, ylabel=""):
+        style_dark_ax(ax)
+        ax.set_title(title, color="white", fontsize=11, weight="bold", pad=6)
+        ax.set_ylabel(ylabel, color="white", fontsize=9)
+        ax.set_xticks(x); ax.set_xticklabels(xlbls, rotation=25, ha="right",
+                                               color="white", fontsize=7.5)
+
+    ax1 = axes[0,0]
+    zone_data = np.zeros((3, len(gids)))
+    for gi, g in enumerate(gids):
+        df = all_dfs[g][~all_dfs[g]["is_pen_shootout"]]
+        fp = df[df["is_france"] & df["pressureType"].isin(["P","A"]) & df["ball_x"].notna()]
+        xs = fp["ball_x"].values
+        zone_data[0,gi] = sum(1 for v in xs if v < -17.5)
+        zone_data[1,gi] = sum(1 for v in xs if -17.5 <= v <= 17.5)
+        zone_data[2,gi] = sum(1 for v in xs if v > 17.5)
+    zone_pct = zone_data / np.maximum(zone_data.sum(axis=0, keepdims=True), 1) * 100
+    ax1.imshow(zone_pct, cmap="RdYlGn", vmin=0, vmax=60, aspect="auto")
+    ax1.set_yticks([0,1,2])
+    ax1.set_yticklabels(["Defensive Third","Middle Third","Attacking Third"],
+                        color="white", fontsize=9)
+    ax1.set_xticks(range(len(gids)))
+    ax1.set_xticklabels(xlbls, rotation=25, ha="right", color="white", fontsize=7.5)
+    for pi in range(3):
+        for gi in range(len(gids)):
+            ax1.text(gi, pi, f"{zone_pct[pi,gi]:.0f}%", ha="center", va="center",
+                     fontsize=9, color="black" if zone_pct[pi,gi]>30 else "white",
+                     weight="bold")
+    ax1.set_title("France Press Zones per Game (%)", color="white",
+                  fontsize=11, weight="bold", pad=6)
+    ax1.tick_params(colors="white")
+
+    ax2 = axes[0,1]
+    zone_data2 = np.zeros((3, len(gids)))
+    for gi, g in enumerate(gids):
+        df = all_dfs[g][~all_dfs[g]["is_pen_shootout"]]
+        fp = df[~df["is_france"] & df["pressureType"].isin(["P","A"]) & df["ball_x"].notna()]
+        xs = fp["ball_x"].values
+        zone_data2[0,gi] = sum(1 for v in xs if v < -17.5)
+        zone_data2[1,gi] = sum(1 for v in xs if -17.5 <= v <= 17.5)
+        zone_data2[2,gi] = sum(1 for v in xs if v > 17.5)
+    zone_pct2 = zone_data2 / np.maximum(zone_data2.sum(axis=0, keepdims=True),1) * 100
+    ax2.imshow(zone_pct2, cmap="RdYlGn", vmin=0, vmax=60, aspect="auto")
+    ax2.set_yticks([0,1,2])
+    ax2.set_yticklabels(["Def Third","Mid Third","Att Third"], color="white", fontsize=9)
+    ax2.set_xticks(range(len(gids)))
+    ax2.set_xticklabels(xlbls, rotation=25, ha="right", color="white", fontsize=7.5)
+    for pi in range(3):
+        for gi in range(len(gids)):
+            ax2.text(gi, pi, f"{zone_pct2[pi,gi]:.0f}%", ha="center", va="center",
+                     fontsize=9, color="black" if zone_pct2[pi,gi]>30 else "white",
+                     weight="bold")
+    ax2.set_title("Opposition Press on France — Zones (%)", color="white",
+                  fontsize=11, weight="bold", pad=6)
+    ax2.tick_params(colors="white")
+
+    ax3 = axes[1,0]
+    fra_p = [len(all_dfs[g][~all_dfs[g]["is_pen_shootout"] &
+                             all_dfs[g]["is_france"] &
+                             all_dfs[g]["pressureType"].isin(["P","A"])]) for g in gids]
+    opp_p = [len(all_dfs[g][~all_dfs[g]["is_pen_shootout"] &
+                             ~all_dfs[g]["is_france"] &
+                             all_dfs[g]["pressureType"].isin(["P","A"])]) for g in gids]
+    ratio = [f/max(o,1) for f,o in zip(fra_p,opp_p)]
+    cols3 = ["#44cc66" if r>1 else "#ff4444" for r in ratio]
+    bars  = ax3.bar(x, ratio, color=cols3, alpha=0.85, edgecolor="#555")
+    ax3.axhline(1, color="white", lw=1.5, ls="--", alpha=0.7, label="Parity (1.0)")
+    for bar,val in zip(bars, ratio):
+        ax3.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.01,
+                 f"{val:.2f}×", ha="center", color="white", fontsize=9, weight="bold")
+    ax3.legend(facecolor="#333", labelcolor="white", fontsize=9)
+    stax(ax3,"Press Ratio France/Opponent  (>1 = France pressed more)","Ratio")
+
+    ax4 = axes[1,1]
+    att_pct = []
+    for g in gids:
+        df = all_dfs[g][~all_dfs[g]["is_pen_shootout"]]
+        fe = df[df["is_france"] & df["ball_x"].notna()]
+        att = sum(1 for v in fe["ball_x"] if v > 17.5)
+        att_pct.append(100*att/max(len(fe),1))
+    bars = ax4.bar(x, att_pct,
+                   color=[RESULT_COLOR[GAME_META[g]["result"]] for g in gids],
+                   alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, att_pct):
+        ax4.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.3,
+                 f"{val:.0f}%", ha="center", color="white", fontsize=8)
+    ax4.axhline(np.mean(att_pct), color="white", lw=1, ls="--", alpha=0.6)
+    stax(ax4,"France % of Events in Attacking Third","% of France events")
+
+    fig.suptitle("France WC 2022 — Pressing & Territory Analysis  |  All 7 Games\n"
+                 "Penalty shootout excluded",
+                 color="white", fontsize=14, weight="bold", y=0.975)
+    fig.savefig(f"{out_dir}/COMP_04_pressing_territory.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"     -> COMP_04_pressing_territory.png")
+
+
+
+
+# COMPARATIVE 5 — PASSING OVERLAY
+
+def plot_comparative_passing_network_overlay(all_dfs, out_dir):
+    print("  -> COMP_05 passing overlay...")
+    game_cols = {"3819":"#ff4444","3834":"#4488ff","3849":"#ffff00",
+                 "10504":"#ff88ff","10513":"#00ffcc","10515":"#ffaa00","10517":"#44ff44"}
+
+    fig, axes = plt.subplots(1,2, figsize=(24,10), facecolor="#1a1a1a")
+
+    ax = axes[0]; draw_pitch(ax)
+    patches = []
+    for g in GAME_ORDER:
+        df  = all_dfs[g][~all_dfs[g]["is_pen_shootout"]]
+        col = game_cols[g]
+        fp  = df[df["is_france"] & (df["possEventType"]=="PA") &
+                 df["passer"].notna() & df["ball_x"].notna()]
+        np_ = fp.groupby("passer")[["ball_x","ball_y"]].mean()
+        pc  = fp.groupby("passer").size()
+        for player, (px, py) in np_.iterrows():
+            n = pc.get(player, 1)
+            ax.scatter(px, py, s=80+400*(n/max(pc.max(),1)), c=col,
+                       zorder=5, alpha=0.65, edgecolors="none")
+        patches.append(mpatches.Patch(color=col,
+                                      label=f"{GAME_META[g]['label_short']} {GAME_META[g]['stage']}"))
+    ax.legend(handles=patches, facecolor="#333", labelcolor="white",
+              fontsize=8, loc="upper left", framealpha=0.85)
+    ax.set_title("France Passing Node Positions — All 7 Games Overlay\n"
+                 "(Colour=match, Size=pass volume, pens excluded)",
+                 color="white", fontsize=11, weight="bold", pad=8)
+
+    ax2 = axes[1]; draw_pitch(ax2)
+    all_fp = pd.concat([
+        all_dfs[g][~all_dfs[g]["is_pen_shootout"] & all_dfs[g]["is_france"] &
+                   (all_dfs[g]["possEventType"]=="PA") &
+                   all_dfs[g]["passer"].notna() & all_dfs[g]["ball_x"].notna()]
+        for g in GAME_ORDER
+    ])
+    if not all_fp.empty:
+        ax2.hist2d(all_fp["ball_x"], all_fp["ball_y"], bins=[26, 17], cmap="YlOrRd",
+                   alpha=0.75, range=[[-52.5,52.5],[-34,34]], zorder=2)
+        avg_pos = all_fp.groupby("passer")[["ball_x","ball_y"]].mean()
+        for player, (px, py) in avg_pos.iterrows():
+            if player not in FRANCE_PLAYERS: continue
+            ax2.scatter(px, py, s=150, c="white", zorder=6, edgecolors="#333", linewidths=1)
+            ax2.text(px, py+2.5, SHORT_NAME.get(player, player.split()[-1]),
+                     ha="center", va="bottom", fontsize=7.5,
+                     color="white", weight="bold", zorder=7)
+    ax2.set_title("France Pass Origin Density — Full Tournament\n"
+                  "(Heat=pass frequency, Dots=avg player position, pens excluded)",
+                  color="white", fontsize=11, weight="bold", pad=8)
+
+    fig.suptitle("France WC 2022 — Passing Patterns Across Tournament",
+                 color="white", fontsize=14, weight="bold", y=1.01)
+    fig.savefig(f"{out_dir}/COMP_05_passing_overlay.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"     -> COMP_05_passing_overlay.png")
+
+
+
+
+
+# COMPARATIVE 6 — CHANCES & GOALS
+
+def plot_comparative_chances_goals(all_dfs, stats_df, out_dir):
+    print("  -> COMP_06 chances & goals...")
+    gids  = GAME_ORDER
+    x     = np.arange(len(gids))
+    df    = stats_df.set_index("game_id").reindex(gids)
+    xlbls = xtick_labels(gids)
+
+    fig, axes = plt.subplots(2,3, figsize=(26,14), facecolor="#1a1a1a")
+    fig.subplots_adjust(hspace=0.45, wspace=0.32, left=0.07, right=0.97,
+                        top=0.92, bottom=0.06)
+
+    def stax(ax, title, ylabel=""):
+        style_dark_ax(ax)
+        ax.set_title(title, color="white", fontsize=10, weight="bold", pad=6)
+        ax.set_ylabel(ylabel, color="white", fontsize=9)
+        ax.set_xticks(x); ax.set_xticklabels(xlbls, rotation=25, ha="right",
+                                               color="white", fontsize=7.5)
+
+    ax1 = axes[0,0]
+    ax1.bar(x, df["fra_C"], color="#ff3333", alpha=0.85, label="Chance (C)")
+    ax1.bar(x, df["fra_H"], bottom=df["fra_C"], color="#ff8800", alpha=0.85, label="Half Chance (H)")
+    ax1.bar(x, df["fra_D"], bottom=df["fra_C"]+df["fra_H"], color="#ffff00", alpha=0.85, label="Dangerous (D)")
+    ax1.legend(facecolor="#333", labelcolor="white", fontsize=8)
+    stax(ax1,"France Chance Type Breakdown","Count")
+
+    ax2 = axes[0,1]
+    ax2.bar(x, df["opp_C"], color="#cc00cc", alpha=0.85, label="Chance (C)")
+    ax2.bar(x, df["opp_H"], bottom=df["opp_C"], color="#9933ff", alpha=0.85, label="Half Chance (H)")
+    ax2.bar(x, df["opp_D"], bottom=df["opp_C"]+df["opp_H"], color="#4488ff", alpha=0.85, label="Dangerous (D)")
+    ax2.legend(facecolor="#333", labelcolor="white", fontsize=8)
+    stax(ax2,"Opponent Chance Type Breakdown","Count")
+
+    ax3 = axes[0,2]
+    fra_eff = [g/max(c,1)*100 for g,c in zip(df["fra_goals"], df["fra_C"])]
+    bars = ax3.bar(x, fra_eff,
+                   color=[RESULT_COLOR[GAME_META[g]["result"]] for g in gids],
+                   alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, fra_eff):
+        ax3.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.3,
+                 f"{val:.0f}%", ha="center", color="white", fontsize=8)
+    stax(ax3,"France Goals per Clear Chance (C) %","%")
+
+    ax4 = axes[1,0]; draw_attacking_half(ax4)
+    all_fs = pd.concat([
+        all_dfs[g][~all_dfs[g]["is_pen_shootout"] & all_dfs[g]["is_france"] &
+                   (all_dfs[g]["possEventType"]=="SH") & all_dfs[g]["ball_x"].notna()]
+        for g in gids
+    ])
+    if not all_fs.empty:
+        ax4.hist2d(all_fs["ball_x"], all_fs["ball_y"], bins=[12, 9], cmap="hot",
+                   alpha=0.75, range=[[17,55],[-26,26]], zorder=2)
+        goals = all_fs[all_fs["shotOutcome"]=="G"]
+        ax4.scatter(goals["ball_x"], goals["ball_y"], c="#00ff00", s=300,
+                    marker="*", zorder=6, edgecolors="white", linewidths=1.5,
+                    label=f"Goals (n={len(goals)})")
+        ax4.legend(facecolor="#333", labelcolor="white", fontsize=8, loc="upper left")
+    ax4.set_title("France Shot Heatmap — Full Tournament\n"
+                  "(★=Goal, heat=density, pens excluded)",
+                  color="white", fontsize=10, weight="bold", pad=6)
+
+    ax5 = axes[1,1]; ax5.set_facecolor("#1a1a1a")
+    all_goals = pd.concat([
+        all_dfs[g][~all_dfs[g]["is_pen_shootout"] & all_dfs[g]["is_france"] &
+                   (all_dfs[g]["shotOutcome"]=="G")]
+        for g in gids
+    ])
+    scorer_c = Counter(all_goals["shooter"].dropna())
+    top_s    = scorer_c.most_common(10)
+    names    = [SHORT_NAME.get(n, n.split()[-1]) for n,_ in top_s]
+    gcnts    = [c for _,c in top_s]
+    bars     = ax5.barh(names[::-1], gcnts[::-1], color="#00ee44", alpha=0.85, edgecolor="#555")
+    for bar,val in zip(bars, gcnts[::-1]):
+        ax5.text(bar.get_width()+0.05, bar.get_y()+bar.get_height()/2,
+                 str(val), va="center", color="white", fontsize=10, weight="bold")
+    ax5.set_xlabel("Goals", color="white", fontsize=9)
+    ax5.set_title("France Top Scorers — WC 2022  (pen shootout excluded)",
+                  color="white", fontsize=10, weight="bold", pad=6)
+    style_dark_ax(ax5)
+    plt.setp(ax5.get_yticklabels(), color="white", fontsize=9)
+
+    ax6 = axes[1,2]
+    ax6.bar(x-0.2, df["fra_lb"], width=0.38, color="#4488ff", alpha=0.85, label="France")
+    ax6.bar(x+0.2, df["opp_lb"], width=0.38, color="#ff4444", alpha=0.85, label="Opponent")
+    ax6.legend(facecolor="#333", labelcolor="white", fontsize=9)
+    stax(ax6,"Line-Breaking Events per Game","Count")
+
+    fig.suptitle("France WC 2022 — Chance Creation & Goals Deep Dive\n"
+                 "Penalty shootout excluded from all stats",
+                 color="white", fontsize=14, weight="bold", y=0.975)
+    fig.savefig(f"{out_dir}/COMP_06_chances_goals.png",
+                dpi=150, bbox_inches="tight", facecolor="#1a1a1a"); plt.close()
+    print(f"     -> COMP_06_chances_goals.png")
+
+
+
+# MAIN
+
+# PER-GAME 11 — TEAM SHAPE AROUND BIG MOMENTS
+# Big moments detected from raw data:
+#   Goals     : possEventType=SH + shotOutcome=G (not nonEvent, not pen shootout)
+#   Own Goals : gameEventType=G
+#   Subs      : gameEventType=SUB
+# No red cards are present in these 7 games (all OFF events = temporary injury exits
+# confirmed by the player returning in later events).
+
+def extract_big_moments(raw, game_id, france_is_home):
+    """Return list of big moment dicts sorted by clock."""
+    moments = []
+    is_pen = lambda clock: (game_id == "10517" and clock > 120 * 60)
+
+    for i, r in enumerate(raw):
+        ge  = r.get("gameEvents")       or {}
+        pe  = r.get("possessionEvents") or {}
+        clock = ge.get("startGameClock", 0) or 0
+        fmt   = ge.get("startFormattedGameClock", "")
+        etype = ge.get("gameEventType", "")
+        team  = ge.get("teamName", "")
+
+        # Skip nonEvents
+        if pe.get("nonEvent"):
+            continue
+
+        # Goal (regular shot)
+        if pe.get("shotOutcomeType") == "G" and not is_pen(clock):
+            scorer   = pe.get("shooterPlayerName", "") or "Unknown"
+            is_fra   = (team == "France")
+            short_sc = SHORT_NAME.get(scorer, scorer.split()[-1] if scorer else "?")
+            team_lbl = "France" if is_fra else GAME_META[game_id]["opponent"]
+            moments.append({
+                "clock": clock, "fmt": fmt, "type": "goal",
+                "label": f"[G] GOAL {team_lbl}\n{short_sc} {fmt}",
+                "team": team_lbl, "is_france": is_fra,
+                "color": "#00ee44" if is_fra else "#ff4444",
+            })
+
+        # Own goal (gameEventType G)
+        elif etype == "G" and not is_pen(clock):
+            # Determine beneficiary from previous event's team
+            prev_team = ""
+            if i > 0:
+                prev_ge = raw[i-1].get("gameEvents") or {}
+                prev_team = prev_ge.get("teamName", "")
+            opp = GAME_META[game_id]["opponent"]
+            beneficiary = prev_team if prev_team else "Unknown"
+            is_fra_benefit = (beneficiary == "France")
+            moments.append({
+                "clock": clock, "fmt": fmt, "type": "own_goal",
+                "label": f"[OG] OWN GOAL\n→ {beneficiary} {fmt}",
+                "team": beneficiary, "is_france": is_fra_benefit,
+                "color": "#00ee44" if is_fra_benefit else "#ff4444",
+            })
+
+        # Substitution
+        elif etype == "SUB" and not is_pen(clock):
+            off  = ge.get("playerOffName", "") or "?"
+            on   = ge.get("playerOnName",  "") or "?"
+            # SUB team is often None in data — infer from next OTB event
+            sub_team = team
+            if not sub_team:
+                for j in range(i+1, min(i+5, len(raw))):
+                    t2 = (raw[j].get("gameEvents") or {}).get("teamName","")
+                    if t2: sub_team = t2; break
+            is_fra = (sub_team == "France")
+            off_s  = SHORT_NAME.get(off,  off.split()[-1]  if off  else "?")
+            on_s   = SHORT_NAME.get(on,   on.split()[-1]   if on   else "?")
+            team_lbl = "France" if is_fra else GAME_META[game_id]["opponent"]
+            moments.append({
+                "clock": clock, "fmt": fmt, "type": "sub",
+                "label": f"[SUB] {team_lbl}\n↓{off_s} ↑{on_s} {fmt}",
+                "team": team_lbl, "is_france": is_fra,
+                "color": "#4488ff" if is_fra else "#ffaa00",
+                "off": off, "on": on,
+            })
+
+    # Deduplicate subs that happen same clock (batch subs) — keep one entry per clock+type+team
+    seen = set()
+    deduped = []
+    for m in moments:
+        key = (m["clock"], m["type"], m.get("team",""))
+        if key not in seen or m["type"] != "sub":
+            deduped.append(m)
+            seen.add(key)
+
+    deduped.sort(key=lambda m: m["clock"])
+    return deduped
+
+
+def get_team_avg_positions(raw, clock_start, clock_end, france_is_home):
+    """
+    Average x/y position of each outfield France player across all
+    tracking snapshots in [clock_start, clock_end].
+    Returns dict: jersey -> {x, y, name, n}
+    """
+    positions = {}
+    for r in raw:
+        ge  = r.get("gameEvents")       or {}
+        pe  = r.get("possessionEvents") or {}
+        if pe.get("nonEvent"): continue
+        clock  = ge.get("startGameClock", 0) or 0
+        period = str(ge.get("period", ""))
+        if not (clock_start <= clock <= clock_end): continue
+
+        players = r.get("homePlayers" if france_is_home else "awayPlayers") or []
+        for p in players:
+            j = str(p.get("jerseyNum", ""))
+            if j == "1": continue          # exclude keeper
+            x = p.get("x"); y = p.get("y")
+            if x is None or y is None: continue
+            # Apply same coord normalisation as load_and_flatten
+            if period == "2": x, y = -x, -y
+            if not france_is_home: x, y = -x, -y
+            if j not in positions:
+                positions[j] = {"xs": [], "ys": [], "name": p.get("playerName", "")}
+            positions[j]["xs"].append(x)
+            positions[j]["ys"].append(y)
+
+    result = {}
+    for j, d in positions.items():
+        if len(d["xs"]) >= 3:          # need at least 3 snapshots
+            result[j] = {
+                "x":    float(np.mean(d["xs"])),
+                "y":    float(np.mean(d["ys"])),
+                "name": d["name"],
+                "n":    len(d["xs"]),
+            }
+    return result
+
+
+def plot_shape_panel(ax, positions, title, phase_label="", dot_color="#1f77b4"):
+    """
+    Draw a full pitch with average player position dots for one phase.
+    phase_label appears as a subtitle beneath the title.
+    """
+    draw_pitch(ax)
+    if not positions:
+        ax.text(0, 0, "No tracking data", ha="center", va="center",
+                color="white", fontsize=10)
+        ax.set_title(title, color="white", fontsize=9, weight="bold", pad=4)
+        return
+
+    for j, d in positions.items():
+        px, py = d["x"], d["y"]
+        ax.scatter(px, py, s=240, c=dot_color, zorder=5,
+                   edgecolors="white", linewidths=1.6)
+        name_lbl = SHORT_NAME.get(d["name"], d["name"].split()[-1] if d["name"] else f"#{j}")
+        ax.text(px, py + 3.2, name_lbl, ha="center", va="bottom",
+                fontsize=7, color="white", weight="bold", zorder=6)
+
+    # Team centroid vertical line — shows average defensive/attacking depth
+    xs = [d["x"] for d in positions.values()]
+    if xs:
+        avg_x = float(np.mean(xs))
+        ax.axvline(avg_x, color=dot_color, lw=1.2, ls="--", alpha=0.45, zorder=3)
+        ax.text(avg_x + 0.8, -31, f"avg depth {avg_x:.1f}m",
+                color=dot_color, fontsize=7, alpha=0.75, zorder=4)
+
+    ax.set_title(title, color="white", fontsize=9, weight="bold", pad=5)
+    if phase_label:
+        ax.text(0, 37.5, phase_label, ha="center", color="#aaaaaa",
+                fontsize=7.5, style="italic")
+
+
+def plot_team_shape(df, game_id, out_dir, france_is_home):
+    """
+    Plot France's average outfield player positions for each tactical phase
+    of the match. Phases are defined by goals AND substitutions — every big
+    moment creates a new phase boundary.
+
+    For each game this produces two files:
+      11a_shape_timeline_XXXX.png  — annotated match timeline
+      11b_shape_phases_XXXX.png    — one pitch panel per phase
+    """
+    meta = GAME_META[game_id]
+    opp  = meta["opponent"]
+
+    # Load raw JSON so we have the player tracking coordinates
+    path = f"{DATA_DIR}/{FILE_MAP[game_id]}"
+    with open(path, encoding="utf-8") as f:
+        raw_full = json.load(f)
+
+    # Determine match end clock (last event clock)
+    end_clock = 0
+    for r in raw_full:
+        ge = r.get("gameEvents") or {}
+        pe = r.get("possessionEvents") or {}
+        if pe.get("nonEvent"): continue
+        c = ge.get("startGameClock", 0) or 0
+        if c > end_clock:
+            end_clock = c
+    # Cap Argentina at end of ET (pen shootout already tagged)
+    if game_id == "10517":
+        end_clock = min(end_clock, 120 * 60)
+
+    # ── Extract all big moments ───────────────────────────────────────────────
+    moments = extract_big_moments(raw_full, game_id, france_is_home)
+    if not moments:
+        print(f"  No big moments found for {game_id}")
+        return
+
+    # ── Build phase list ──────────────────────────────────────────────────────
+    # Each phase = (start_clock, end_clock, label, boundary_moment_or_None)
+    # Phase 0 always starts at 0. Each moment creates the boundary for next phase.
+    # Consecutive subs within 90 seconds are merged into one boundary.
+
+    # Collapse same-minute batch events into single boundary events
+    boundaries = []
+    for m in moments:
+        if boundaries and abs(m["clock"] - boundaries[-1]["clock"]) <= 90 \
+                and m["type"] == "sub" and boundaries[-1]["type"] == "sub":
+            # Merge into existing boundary — append sub details
+            boundaries[-1]["label"] += f"\n+ {m['label'].split(chr(10))[-1]}"
+            boundaries[-1]["subs"].append(m)
+        else:
+            entry = dict(m)
+            entry["subs"] = [m] if m["type"] == "sub" else []
+            boundaries.append(entry)
+
+    phases = []
+    phase_starts = [0] + [b["clock"] for b in boundaries]
+    phase_ends   = [b["clock"] for b in boundaries] + [end_clock]
+
+    for i, (ps, pe_c, bnd) in enumerate(
+            zip(phase_starts, phase_ends, [None] + boundaries)):
+        # Skip zero-length phases
+        if pe_c <= ps:
+            continue
+
+        start_min = ps // 60
+        end_min   = pe_c // 60
+
+        if bnd is None:
+            phase_lbl = f"Phase 1: Kick-off → {end_min}'"
+            dot_col   = "#aaaaaa"
+        else:
+            btype = bnd["type"]
+            if btype in ("goal", "own_goal"):
+                scorer_lbl = bnd["label"].replace("\n", " ")
+                dot_col    = "#00ee44" if bnd["is_france"] else "#ff4444"
+            else:
+                scorer_lbl = bnd["label"].replace("\n", " ")
+                dot_col    = "#4488ff" if bnd["is_france"] else "#ffaa00"
+            phase_lbl = f"Phase {i+1}: After {scorer_lbl} → {end_min}'"
+
+        phases.append({
+            "start":     ps,
+            "end":       pe_c,
+            "label":     phase_lbl,
+            "dot_color": dot_col,
+            "boundary":  bnd,
+            "start_min": start_min,
+            "end_min":   end_min,
+            "duration":  (pe_c - ps) // 60,
+        })
+
+    # ── Figure 1: Timeline ────────────────────────────────────────────────────
+    match_mins = end_clock / 60
+    fig_tl, ax_tl = plt.subplots(
+        figsize=(max(16, match_mins * 0.22 + 2), 5), facecolor="#1a1a1a")
+    ax_tl.set_facecolor("#1a1a1a")
+    ax_tl.set_xlim(-2, match_mins + 3)
+    ax_tl.set_ylim(-0.5, 3.5)
+    ax_tl.axis("off")
+
+    # Phase background bands
+    for ph in phases:
+        ax_tl.axvspan(ph["start"] / 60, ph["end"] / 60,
+                      alpha=0.06, color=ph["dot_color"], zorder=0)
+
+    # HT / ET dividers
+    for div_min, div_lbl in [(45,"HT"), (90,"90'"), (105,"105'"), (120,"120'")]:
+        if div_min <= match_mins:
+            ax_tl.axvline(div_min, color="#555", lw=1.5, ls="--", alpha=0.8)
+            ax_tl.text(div_min, 3.2, div_lbl, ha="center",
+                       color="#888", fontsize=9)
+
+    # Timeline spine
+    ax_tl.axhline(1, color="#444", lw=1.5, alpha=0.6)
+
+    # Plot each moment
+    plotted_clocks = {}
+    for m in moments:
+        mins = m["clock"] / 60
+        col  = m["color"]
+        key  = round(mins)
+        jitter = plotted_clocks.get(key, 0)
+        plotted_clocks[key] = jitter + 1
+        y_pos = 1 + jitter * 0.55
+
+        ax_tl.scatter(mins, y_pos, s=200, c=col, zorder=5,
+                      edgecolors="white", linewidths=1.3)
+        ax_tl.plot([mins, mins], [0.08, y_pos - 0.2],
+                   color=col, lw=1, alpha=0.4, zorder=3)
+        short_lbl = m["label"].replace("\n", " ")
+        ax_tl.text(mins, y_pos + 0.28, short_lbl,
+                   ha="center", va="bottom", fontsize=6.5,
+                   color="white", zorder=6, rotation=28,
+                   bbox=dict(facecolor="#1a1a1a", edgecolor="none",
+                             alpha=0.75, pad=1.5))
+
+    # Phase labels along the bottom
+    for ph in phases:
+        mid = (ph["start"] + ph["end"]) / 2 / 60
+        ax_tl.text(mid, 0.2, f"Phase {phases.index(ph)+1}\n({ph['duration']} min)",
+                   ha="center", va="bottom", fontsize=7,
+                   color=ph["dot_color"], alpha=0.8)
+
+    ax_tl.set_title(
+        f"Match Phases — {meta['stage']}: {meta['label']}\n"
+        f"Every goal or substitution creates a new phase  |  "
+        f"Green=France goal  Red={opp} goal  Blue=France sub  Orange={opp} sub",
+        color="white", fontsize=11, weight="bold", pad=8)
+
+    fig_tl.savefig(f"{out_dir}/11a_shape_timeline_{game_id}.png",
+                   dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> 11a_shape_timeline_{game_id}.png  "
+          f"({len(phases)} phases, {len(moments)} moments)")
+
+    # ── Figure 2: One pitch panel per phase ──────────────────────────────────
+    n_phases = len(phases)
+    # Layout: up to 3 columns, as many rows as needed
+    ncols = min(n_phases, 3)
+    nrows = (n_phases + ncols - 1) // ncols
+
+    fig_ph = plt.figure(
+        figsize=(ncols * 9, nrows * 6.5 + 1.2), facecolor="#1a1a1a")
+    gs_ph  = fig_ph.add_gridspec(
+        nrows, ncols, hspace=0.30, wspace=0.06,
+        left=0.02, right=0.98, top=0.93, bottom=0.02)
+
+    for idx, ph in enumerate(phases):
+        row = idx // ncols
+        col = idx  % ncols
+        ax  = fig_ph.add_subplot(gs_ph[row, col])
+
+        positions = get_team_avg_positions(
+            raw_full, ph["start"], ph["end"], france_is_home)
+
+        # Phase subtitle: what triggered this phase
+        bnd = ph["boundary"]
+        if bnd is None:
+            phase_sub = "Game start"
+        elif bnd["type"] in ("goal", "own_goal"):
+            scored_by = "France" if bnd["is_france"] else opp
+            phase_sub = f"After {scored_by} goal ({bnd['fmt']})"
+        else:
+            team_lbl = "France" if bnd["is_france"] else opp
+            # List all subs in this boundary
+            sub_details = []
+            for s in bnd.get("subs", [bnd]):
+                off_s = SHORT_NAME.get(s.get("off",""), (s.get("off","") or "?").split()[-1])
+                on_s  = SHORT_NAME.get(s.get("on",""),  (s.get("on","")  or "?").split()[-1])
+                sub_details.append(f"{off_s}→{on_s}")
+            phase_sub = f"After {team_lbl} sub ({bnd['fmt']}): {', '.join(sub_details)}"
+
+        n_events = sum(1 for r in raw_full
+                       if ph["start"] <= (r.get("gameEvents") or {}).get("startGameClock", 0) <= ph["end"])
+
+        plot_shape_panel(
+            ax, positions,
+            title=(f"Phase {idx+1}:  {ph['start_min']}' – {ph['end_min']}'  "
+                   f"({ph['duration']} min)"),
+            phase_label=phase_sub,
+            dot_color=ph["dot_color"],
+        )
+
+    # Hide any unused subplot slots
+    for idx in range(n_phases, nrows * ncols):
+        row = idx // ncols; col = idx % ncols
+        fig_ph.add_subplot(gs_ph[row, col]).set_visible(False)
+
+    fig_ph.suptitle(
+        f"France Shape by Tactical Phase — {meta['stage']}: {meta['label']}\n"
+        f"Average player positions across each phase  |  "
+        f"Phases defined by goals & substitutions  |  France attacks →",
+        color="white", fontsize=12, weight="bold", y=0.985)
+
+    fig_ph.savefig(f"{out_dir}/11b_shape_phases_{game_id}.png",
+                   dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.close()
+    print(f"  -> 11b_shape_phases_{game_id}.png")
+
+if __name__ == "__main__":
+    os.makedirs(PER_GAME_DIR, exist_ok=True)
+    os.makedirs(COMP_DIR,     exist_ok=True)
+
+    print("\n" + "="*60)
+    print("LOADING ALL GAMES")
+    print("  nonEvent=True rows filtered at load time")
+    print("  ARG penalty shootout rows tagged is_pen_shootout=True")
+    print("="*60)
+    all_dfs  = {}
+    all_home = {}
+    for game_id, fname in FILE_MAP.items():
+        path = f"{DATA_DIR}/{fname}"
+        meta = GAME_META[game_id]
+        print(f"\nLoading {game_id}: {meta['stage']} — {meta['label'].replace(chr(10),' ')}")
+        df, fih = load_and_flatten(path, game_id)
+        all_dfs[game_id]  = df
+        all_home[game_id] = fih
+        n_total = len(df)
+        n_pen   = int(df["is_pen_shootout"].sum())
+        fg = len(df[df["is_france"]  & (df["shotOutcome"]=="G") & ~df["is_pen_shootout"]])
+        og = len(df[~df["is_france"] & (df["shotOutcome"]=="G") & ~df["is_pen_shootout"]])
+        print(f"  {n_total} events | France {'home' if fih else 'away'} | "
+              f"Goals FRA {fg} – OPP {og}"
+              + (f" | +{n_pen} pen shootout events tagged" if n_pen else ""))
+
+    print("\n" + "="*60)
+    print("PER-GAME PLOTS")
+    print("="*60)
+    for game_id, df in all_dfs.items():
+        meta = GAME_META[game_id]
+        print(f"\n── {meta['stage']}: {meta['label'].replace(chr(10),' ')} ──")
+        game_dir = f"{PER_GAME_DIR}/{game_id}_{meta['opponent']}"
+        os.makedirs(game_dir, exist_ok=True)
+        for fn, args in [
+            (plot_passing_network,      (df, game_id, game_dir)),
+            (plot_press_map,            (df, game_id, game_dir)),
+            (plot_lines_broken,         (df, game_id, game_dir)),
+            (plot_chance_creation,      (df, game_id, game_dir)),
+            (plot_shot_map,             (df, game_id, game_dir)),
+            (plot_player_grades,        (df, game_id, game_dir)),
+            (plot_mbappe_passes_shots,  (df, game_id, game_dir)),
+            (plot_mbappe_event_analysis,(df, game_id, game_dir, all_home[game_id])),
+            (plot_set_pieces,           (df, game_id, game_dir)),
+            (plot_sequence_analysis,    (df, game_id, game_dir)),
+        ]:
+            try:
+                fn(*args)
+            except Exception as e:
+                print(f"  [SKIP] {fn.__name__}: {e}")
+        try:
+            plot_team_shape(df, game_id, game_dir, all_home[game_id])
+        except Exception as e:
+            print(f"  [SKIP] plot_team_shape: {e}")
+
+    print("\n" + "="*60)
+    print("COMPARATIVE PLOTS")
+    print("="*60)
+    stats_df = build_comparative_stats(all_dfs, all_home)
+    for fn, args in [
+        (plot_comparative_overview,              (stats_df, COMP_DIR)),
+        (plot_comparative_mbappe,                (all_dfs, stats_df, COMP_DIR)),
+        (plot_comparative_player_grades,         (all_dfs, COMP_DIR)),
+        (plot_comparative_pressing,              (all_dfs, COMP_DIR)),
+        (plot_comparative_passing_network_overlay,(all_dfs, COMP_DIR)),
+        (plot_comparative_chances_goals,         (all_dfs, stats_df, COMP_DIR)),
+    ]:
+        try:
+            fn(*args)
+        except Exception as e:
+            print(f"  [SKIP] {fn.__name__}: {e}")
+
+    print("\n" + "="*60)
+    print("ALL DONE")
+    print(f"  Per-game : {PER_GAME_DIR}")
+    print(f"  Comparative: {COMP_DIR}")
+    print("="*60)
