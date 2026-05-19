@@ -1,0 +1,1124 @@
+"""
+France WC 2022 — Mbappé, Network & Opponent Analysis Dashboard
+Generates a standalone HTML file from the 7 match JSON files.
+"""
+
+DATA_DIR = r"C:\Users\stafa\Downloads"
+OUT_FILE = r"C:\Users\stafa\Downloads\soccerproject\france_advanced_dashboard.html"
+
+FILE_MAP = {
+    "3819":  ("3819.json",  "FRA 4-1 AUS", "Australia",  True),
+    "3834":  ("3834.json",  "FRA 2-1 DEN", "Denmark",    True),
+    "3849":  ("3849.json",  "FRA 0-1 TUN", "Tunisia",    False),
+    "10504": ("10504.json", "FRA 3-1 POL", "Poland",     True),
+    "10513": ("10513.json", "FRA 2-1 ENG", "England",    False),
+    "10515": ("10515.json", "FRA 2-0 MAR", "Morocco",    True),
+    "10517": ("10517.json", "FRA 3-3 ARG (AET)", "Argentina", False),
+}
+GAME_ORDER = ["3819","3834","3849","10504","10513","10515","10517"]
+
+SHORT = {
+    'Aurélien Tchouaméni':'Tchouaméni','Antoine Griezmann':'Griezmann',
+    'Kylian Mbappé':'Mbappé','Olivier Giroud':'Giroud','Adrien Rabiot':'Rabiot',
+    'Hugo Lloris':'Lloris','Jules Kounde':'Kounde','Ousmane Dembele':'Dembele',
+    'Dayot Upamecano':'Upamecano','Raphael Varane':'Varane',
+    'Theo Hernandez':'T.Hernandez','Ibrahima Konaté':'Konaté',
+    'Randal Kolo Muani':'Kolo Muani','Eduardo Camavinga':'Camavinga',
+    'Youssouf Fofana':'Fofana','Marcus Thuram':'Thuram',
+    'William Saliba':'Saliba','Benjamin Pavard':'Pavard','Kingsley Coman':'Coman',
+}
+FRANCE_PLAYERS = set(SHORT.keys())
+
+import json, os
+import numpy as np
+from collections import defaultdict
+
+def load_raw(gid):
+    fname = FILE_MAP[gid][0]
+    with open(os.path.join(DATA_DIR, fname), encoding="utf-8") as f:
+        return json.load(f)
+
+def get_goals(raw, gid):
+    goals = []
+    for r in raw:
+        ge = r.get("gameEvents") or {}
+        pe = r.get("possessionEvents") or {}
+        if pe.get("nonEvent"): continue
+        clock = ge.get("startGameClock", 0) or 0
+        if gid == "10517" and clock > 7200: continue
+        if pe.get("shotOutcomeType") == "G":
+            goals.append({"clock": clock, "is_france": ge.get("teamName") == "France",
+                           "scorer": pe.get("shooterPlayerName",""),
+                           "fmt": ge.get("startFormattedGameClock","")})
+    return sorted(goals, key=lambda x: x["clock"])
+
+def phase_type(clock, goals):
+    prev = None
+    for g in goals:
+        if g["clock"] < clock: prev = g
+        else: break
+    if prev is None: return "opening"
+    return "after_fra" if prev["is_france"] else "after_opp"
+
+PHASE_LABELS = {"opening": "Game start", "after_fra": "After France goal",
+                "after_opp": "After opponent goal"}
+
+
+
+# MBAPPE INVOLVEMENT
+def compute_mbappe_involvement():
+    """Per-game and per-tournament: sequences with/without Mbappé involvement."""
+    results = []
+
+    for gid in GAME_ORDER:
+        _, label, opp, france_home = FILE_MAP[gid]
+        raw   = load_raw(gid)
+        goals = get_goals(raw, gid)
+
+        # Step 1: classify each sequence as Mbappé-involved or not
+        seq_mbappe = {}
+        for r in raw:
+            ge = r.get("gameEvents") or {}
+            pe = r.get("possessionEvents") or {}
+            if pe.get("nonEvent"): continue
+            if ge.get("teamName") != "France": continue
+            seq = r.get("sequence")
+            if seq is None: continue
+            clock = ge.get("startGameClock", 0) or 0
+            if gid == "10517" and clock > 7200: continue
+            involved = any([
+                pe.get("passerPlayerName")    == "Kylian Mbappé",
+                pe.get("receiverPlayerName")  == "Kylian Mbappé",
+                pe.get("shooterPlayerName")   == "Kylian Mbappé",
+                pe.get("carrierPlayerName")   == "Kylian Mbappé",
+                pe.get("ballCarrierPlayerName")== "Kylian Mbappé",
+                ge.get("playerName")          == "Kylian Mbappé",
+            ])
+            if involved:
+                seq_mbappe[seq] = True
+            elif seq not in seq_mbappe:
+                seq_mbappe[seq] = False
+
+        # Step 2: accumulate sequence stats
+        seq_stats = defaultdict(lambda: {"shots":0,"goals":0,"C":0,"H":0,
+                                          "passes":0,"comp":0,"lb":0})
+        for r in raw:
+            ge = r.get("gameEvents") or {}
+            pe = r.get("possessionEvents") or {}
+            if pe.get("nonEvent"): continue
+            if ge.get("teamName") != "France": continue
+            seq = r.get("sequence")
+            if seq is None: continue
+            clock = ge.get("startGameClock", 0) or 0
+            if gid == "10517" and clock > 7200: continue
+            s = seq_stats[seq]
+            s["shots"]  += (pe.get("possessionEventType") == "SH")
+            s["goals"]  += (pe.get("shotOutcomeType") == "G")
+            s["C"]      += (pe.get("opportunityType") == "C")
+            s["H"]      += (pe.get("opportunityType") == "H")
+            s["lb"]     += bool(pe.get("linesBrokenType"))
+            if pe.get("possessionEventType") == "PA" and pe.get("passerPlayerName"):
+                s["passes"] += 1
+                s["comp"]   += (pe.get("passOutcomeType") == "C")
+
+        def agg(seqs):
+            n = len(seqs)
+            if n == 0: return {}
+            return {
+                "n": n,
+                "shots_per_seq":  round(sum(s["shots"]  for s in seqs) / n, 3),
+                "goals_per_seq":  round(sum(s["goals"]  for s in seqs) / n, 3),
+                "chances_per_seq":round(sum(s["C"]+s["H"] for s in seqs) / n, 3),
+                "lb_per_seq":     round(sum(s["lb"]     for s in seqs) / n, 3),
+                "pass_comp":      round(100 * sum(s["comp"] for s in seqs) /
+                                        max(sum(s["passes"] for s in seqs), 1), 1),
+                "total_shots":    sum(s["shots"] for s in seqs),
+                "total_goals":    sum(s["goals"] for s in seqs),
+            }
+
+        with_m    = [seq_stats[s] for s in seq_mbappe if seq_mbappe[s] and s in seq_stats]
+        without_m = [seq_stats[s] for s in seq_mbappe if not seq_mbappe[s] and s in seq_stats]
+
+        results.append({
+            "gid": gid, "label": label, "opp": opp,
+            "with":    agg(with_m),
+            "without": agg(without_m),
+        })
+
+    return results
+
+
+def compute_mbappe_shots_by_phase():
+    """All Mbappé shots labelled by phase type."""
+    shots = []
+    for gid in GAME_ORDER:
+        _, label, opp, france_home = FILE_MAP[gid]
+        raw   = load_raw(gid)
+        goals = get_goals(raw, gid)
+        for r in raw:
+            ge = r.get("gameEvents") or {}
+            pe = r.get("possessionEvents") or {}
+            if pe.get("nonEvent"): continue
+            if pe.get("shooterPlayerName") != "Kylian Mbappé": continue
+            clock = ge.get("startGameClock", 0) or 0
+            if gid == "10517" and clock > 7200: continue
+            outcome = pe.get("shotOutcomeType", "")
+            shots.append({
+                "gid": gid, "label": label,
+                "clock": clock, "fmt": ge.get("startFormattedGameClock",""),
+                "outcome": outcome,
+                "on_target": outcome in ("G","S","F"),
+                "is_goal":   outcome == "G",
+                "pressed":   pe.get("pressureType","") in ("P","A"),
+                "phase":     phase_type(clock, goals),
+                "body":      pe.get("bodyType",""),
+                "nature":    pe.get("shotNatureType",""),
+            })
+    return shots
+
+
+def compute_mbappe_pass_isolation():
+    """Passes aimed at Mbappé vs completions, and his own pass comp, by phase."""
+    data = {pt: {"to_mb":0,"to_mb_comp":0,"mb_made":0,"mb_comp":0}
+            for pt in ["opening","after_fra","after_opp"]}
+
+    for gid in GAME_ORDER:
+        _, label, opp, france_home = FILE_MAP[gid]
+        raw   = load_raw(gid)
+        goals = get_goals(raw, gid)
+        for r in raw:
+            ge = r.get("gameEvents") or {}
+            pe = r.get("possessionEvents") or {}
+            if pe.get("nonEvent"): continue
+            if ge.get("teamName") != "France": continue
+            if pe.get("possessionEventType") != "PA": continue
+            clock = ge.get("startGameClock", 0) or 0
+            if gid == "10517" and clock > 7200: continue
+            pt   = phase_type(clock, goals)
+            comp = pe.get("passOutcomeType") == "C"
+            if pe.get("passerPlayerName") == "Kylian Mbappé":
+                data[pt]["mb_made"] += 1
+                if comp: data[pt]["mb_comp"] += 1
+            if pe.get("targetPlayerName") == "Kylian Mbappé":
+                data[pt]["to_mb"] += 1
+                if comp: data[pt]["to_mb_comp"] += 1
+
+    return data
+
+
+
+# Passing Networks
+def compute_network_centrality():
+    """Pass involvement (made + received) per player per phase type."""
+    made     = {pt: defaultdict(int) for pt in ["opening","after_fra","after_opp"]}
+    received = {pt: defaultdict(int) for pt in ["opening","after_fra","after_opp"]}
+    totals   = {pt: 0 for pt in ["opening","after_fra","after_opp"]}
+
+    for gid in GAME_ORDER:
+        _, label, opp, france_home = FILE_MAP[gid]
+        raw   = load_raw(gid)
+        goals = get_goals(raw, gid)
+        for r in raw:
+            ge = r.get("gameEvents") or {}
+            pe = r.get("possessionEvents") or {}
+            if pe.get("nonEvent"): continue
+            if ge.get("teamName") != "France": continue
+            if pe.get("possessionEventType") != "PA": continue
+            if pe.get("passOutcomeType") != "C": continue   # completed only
+            clock  = ge.get("startGameClock", 0) or 0
+            if gid == "10517" and clock > 7200: continue
+            passer   = pe.get("passerPlayerName")
+            receiver = pe.get("receiverPlayerName")
+            pt       = phase_type(clock, goals)
+            if passer and passer in FRANCE_PLAYERS:
+                p = SHORT.get(passer, passer)
+                made[pt][p] += 1
+                totals[pt]  += 1
+            if receiver and receiver in FRANCE_PLAYERS:
+                r2 = SHORT.get(receiver, receiver)
+                received[pt][r2] += 1
+
+    result = {}
+    for pt in ["opening","after_fra","after_opp"]:
+        all_p = set(list(made[pt].keys()) + list(received[pt].keys()))
+        inv   = {p: made[pt].get(p,0) + received[pt].get(p,0) for p in all_p}
+        total_passes = totals[pt]
+        result[pt] = {
+            "total_passes": total_passes,
+            "players": [
+                {"name": p,
+                 "made": made[pt].get(p,0),
+                 "received": received[pt].get(p,0),
+                 "involvement": inv[p],
+                 "pct": round(100 * inv[p] / max(total_passes * 2, 1), 1)}
+                for p in sorted(inv, key=lambda x: -inv[x])[:12]
+            ]
+        }
+    return result
+
+
+def compute_tchouameni_targets():
+    """Tchouaméni's top pass targets by phase: he's the #1 distributor."""
+    data = {pt: defaultdict(lambda: {"total":0,"comp":0})
+            for pt in ["opening","after_fra","after_opp"]}
+
+    for gid in GAME_ORDER:
+        _, label, opp, france_home = FILE_MAP[gid]
+        raw   = load_raw(gid)
+        goals = get_goals(raw, gid)
+        for r in raw:
+            ge = r.get("gameEvents") or {}
+            pe = r.get("possessionEvents") or {}
+            if pe.get("nonEvent"): continue
+            if ge.get("teamName") != "France": continue
+            if pe.get("possessionEventType") != "PA": continue
+            if pe.get("passerPlayerName") != "Aurélien Tchouaméni": continue
+            clock  = ge.get("startGameClock", 0) or 0
+            if gid == "10517" and clock > 7200: continue
+            target = pe.get("targetPlayerName")
+            if not target or target not in FRANCE_PLAYERS: continue
+            pt   = phase_type(clock, goals)
+            comp = pe.get("passOutcomeType") == "C"
+            t    = SHORT.get(target, target.split()[-1])
+            data[pt][t]["total"] += 1
+            if comp: data[pt][t]["comp"] += 1
+
+    return {pt: sorted(data[pt].items(), key=lambda x: -x[1]["total"])[:7]
+            for pt in data}
+
+
+
+
+# HTML
+def build_html(inv_data, shot_data, isolation_data, network_data, tchou_data):
+    import json as _json
+
+    # ── Involvement chart data ──
+    game_labels = [FILE_MAP[g][1] for g in GAME_ORDER]
+    shots_with    = [d["with"].get("shots_per_seq", 0)  for d in inv_data]
+    shots_without = [d["without"].get("shots_per_seq",0) for d in inv_data]
+    goals_with    = [d["with"].get("goals_per_seq", 0)  for d in inv_data]
+    goals_without = [d["without"].get("goals_per_seq",0) for d in inv_data]
+    lb_with       = [d["with"].get("lb_per_seq", 0)     for d in inv_data]
+    lb_without    = [d["without"].get("lb_per_seq",0)    for d in inv_data]
+    comp_with     = [d["with"].get("pass_comp", 0)      for d in inv_data]
+    comp_without  = [d["without"].get("pass_comp",0)     for d in inv_data]
+    n_with        = [d["with"].get("n", 0)               for d in inv_data]
+    n_without     = [d["without"].get("n",0)              for d in inv_data]
+
+    # Tournament totals
+    total_with_shots  = sum(d["with"].get("total_shots",0)  for d in inv_data)
+    total_with_goals  = sum(d["with"].get("total_goals",0)  for d in inv_data)
+    total_with_seqs   = sum(d["with"].get("n",0)            for d in inv_data)
+    total_wo_shots    = sum(d["without"].get("total_shots",0) for d in inv_data)
+    total_wo_goals    = sum(d["without"].get("total_goals",0) for d in inv_data)
+    total_wo_seqs     = sum(d["without"].get("n",0)           for d in inv_data)
+
+    # ── Shot quality ──
+    phase_shots = {pt: [s for s in shot_data if s["phase"]==pt]
+                   for pt in ["opening","after_fra","after_opp"]}
+
+    def shot_stats(lst):
+        n = len(lst)
+        return {
+            "n": n,
+            "goals":     sum(s["is_goal"]   for s in lst),
+            "on_target": sum(s["on_target"] for s in lst),
+            "pressed":   sum(s["pressed"]   for s in lst),
+            "goal_pct":     round(100*sum(s["is_goal"]   for s in lst)/max(n,1)),
+            "on_tgt_pct":   round(100*sum(s["on_target"] for s in lst)/max(n,1)),
+            "pressed_pct":  round(100*sum(s["pressed"]   for s in lst)/max(n,1)),
+        }
+
+    sq = {pt: shot_stats(phase_shots[pt]) for pt in phase_shots}
+
+    # All shots for scatter plot
+    all_shots_scatter = [
+        {"phase": s["phase"], "label": s["label"], "fmt": s["fmt"],
+         "outcome": s["outcome"], "goal": s["is_goal"],
+         "on_target": s["on_target"], "pressed": s["pressed"]}
+        for s in shot_data
+    ]
+
+    # ── Pass isolation ──
+    iso = {pt: {
+        "to_mb":      isolation_data[pt]["to_mb"],
+        "to_mb_comp": isolation_data[pt]["to_mb_comp"],
+        "to_mb_pct":  round(100*isolation_data[pt]["to_mb_comp"]/max(isolation_data[pt]["to_mb"],1)),
+        "mb_made":    isolation_data[pt]["mb_made"],
+        "mb_comp":    isolation_data[pt]["mb_comp"],
+        "mb_comp_pct":round(100*isolation_data[pt]["mb_comp"]/max(isolation_data[pt]["mb_made"],1)),
+    } for pt in ["opening","after_fra","after_opp"]}
+
+    # ── Network centrality ──
+    net_json = {pt: network_data[pt] for pt in network_data}
+
+    # ── Tchouaméni targets ──
+    tchou_json = {pt: [{"name":n,"total":d["total"],"comp":d["comp"],
+                         "pct": round(100*d["comp"]/max(d["total"],1))}
+                        for n,d in tchou_data[pt]]
+                  for pt in tchou_data}
+
+    chart_data = _json.dumps({
+        "game_labels":    game_labels,
+        "shots_with":     shots_with,
+        "shots_without":  shots_without,
+        "goals_with":     goals_with,
+        "goals_without":  goals_without,
+        "lb_with":        lb_with,
+        "lb_without":     lb_without,
+        "comp_with":      comp_with,
+        "comp_without":   comp_without,
+        "n_with":         n_with,
+        "n_without":      n_without,
+        "total_with_shots": total_with_shots,
+        "total_with_goals": total_with_goals,
+        "total_with_seqs":  total_with_seqs,
+        "total_wo_shots":   total_wo_shots,
+        "total_wo_goals":   total_wo_goals,
+        "total_wo_seqs":    total_wo_seqs,
+        "shot_quality":   sq,
+        "all_shots":      all_shots_scatter,
+        "isolation":      iso,
+        "network":        net_json,
+        "tchouameni":     tchou_json,
+    })
+
+    # ── Involvement rows for table ──
+    inv_rows = ""
+    for d in inv_data:
+        w = d["with"]; wo = d["without"]
+        inv_rows += f"""
+        <tr>
+          <td><strong>{d['label']}</strong></td>
+          <td>{w.get('n',0)}</td>
+          <td style="color:#27ae60;font-weight:600">{w.get('shots_per_seq',0):.3f}</td>
+          <td style="color:#27ae60;font-weight:600">{w.get('goals_per_seq',0):.3f}</td>
+          <td style="color:#27ae60;font-weight:600">{w.get('lb_per_seq',0):.3f}</td>
+          <td style="color:#27ae60;font-weight:600">{w.get('pass_comp',0):.1f}%</td>
+          <td>{wo.get('n',0)}</td>
+          <td style="color:#e74c3c">{wo.get('shots_per_seq',0):.3f}</td>
+          <td style="color:#e74c3c">{wo.get('goals_per_seq',0):.3f}</td>
+          <td style="color:#e74c3c">{wo.get('lb_per_seq',0):.3f}</td>
+          <td style="color:#e74c3c">{wo.get('pass_comp',0):.1f}%</td>
+        </tr>"""
+
+    # ── KPI cards ──
+    spm_ratio = round(total_with_shots/max(total_with_seqs,1) /
+                      max(total_wo_shots/max(total_wo_seqs,1),0.001), 1)
+    gpm_ratio = round(total_with_goals/max(total_with_seqs,1) /
+                      max(total_wo_goals/max(total_wo_seqs,1),0.001), 1) if total_wo_goals else "∞"
+
+    # Mbappé shot quality KPI narrative
+    sq_open = sq["opening"]; sq_fra = sq["after_fra"]; sq_opp = sq["after_opp"]
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>France WC 2022 — Advanced Analysis Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {{
+    --bg:#0f0f0f; --surface:#1a1a1a; --surface2:#242424;
+    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.13);
+    --text:#f0f0f0; --text2:#999; --text3:#555;
+    --red:#e74c3c; --red-bg:rgba(231,76,60,0.1);
+    --amber:#f39c12; --amber-bg:rgba(243,156,18,0.1);
+    --green:#27ae60; --green-bg:rgba(39,174,96,0.1);
+    --blue:#3498db; --blue-bg:rgba(52,152,219,0.1);
+    --purple:#9b59b6; --purple-bg:rgba(155,89,182,0.1);
+    --r:10px; --r-sm:6px;
+  }}
+  *{{box-sizing:border-box;margin:0;padding:0;}}
+  body{{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.5;}}
+  .page{{max-width:1400px;margin:0 auto;padding:2rem 1.5rem 4rem;}}
+  h1{{font-size:24px;font-weight:600;margin-bottom:4px;}}
+  .sub{{color:var(--text2);font-size:13px;margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:.5px solid var(--border2);}}
+  .section{{margin-bottom:2.5rem;}}
+  .stitle{{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:1rem;padding-bottom:6px;border-bottom:.5px solid var(--border);}}
+  .card{{background:var(--surface);border:.5px solid var(--border2);border-radius:var(--r);padding:1.2rem;}}
+  .card-title{{font-size:13px;font-weight:600;margin-bottom:3px;}}
+  .card-sub{{font-size:11px;color:var(--text2);margin-bottom:1rem;}}
+  .g2{{display:grid;grid-template-columns:1fr 1fr;gap:14px;}}
+  .g3{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}}
+  .g4{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}}
+  @media(max-width:900px){{.g2,.g3,.g4{{grid-template-columns:1fr;}}}}
+  .kpi{{padding:1rem 1.1rem;}}
+  .kpi-lbl{{font-size:11px;color:var(--text2);margin-bottom:5px;}}
+  .kpi-val{{font-size:26px;font-weight:600;line-height:1;margin-bottom:3px;}}
+  .kpi-sub{{font-size:11px;color:var(--text3);}}
+  .kpi.red .kpi-val{{color:var(--red);}} .kpi.grn .kpi-val{{color:var(--green);}}
+  .kpi.amb .kpi-val{{color:var(--amber);}} .kpi.blue .kpi-val{{color:var(--blue);}}
+  .tabs{{display:flex;gap:4px;margin-bottom:1.5rem;flex-wrap:wrap;}}
+  .tab{{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;
+        border:.5px solid var(--border2);background:transparent;color:var(--text2);transition:all .15s;}}
+  .tab:hover{{background:var(--surface2);color:var(--text);}}
+  .tab.active{{background:var(--text);color:var(--bg);border-color:var(--text);}}
+  .tab-content{{display:none;}} .tab-content.active{{display:block;}}
+  .ch{{position:relative;width:100%;}}
+  .ch-260{{height:260px;}} .ch-300{{height:300px;}} .ch-340{{height:340px;}} .ch-400{{height:400px;}}
+  table{{width:100%;border-collapse:collapse;font-size:12px;}}
+  th{{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);
+      padding:7px 9px;border-bottom:.5px solid var(--border2);text-align:left;white-space:nowrap;}}
+  td{{padding:6px 9px;border-bottom:.5px solid var(--border);color:var(--text);vertical-align:middle;}}
+  tr:last-child td{{border-bottom:none;}} tr:hover td{{background:var(--surface2);}}
+  .badge{{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;}}
+  .b-grn{{background:var(--green-bg);color:var(--green);}}
+  .b-red{{background:var(--red-bg);color:var(--red);}}
+  .b-amb{{background:var(--amber-bg);color:var(--amber);}}
+  .b-blue{{background:var(--blue-bg);color:var(--blue);}}
+  .b-pur{{background:var(--purple-bg);color:var(--purple);}}
+  .insight{{border-left:3px solid var(--red);background:var(--surface);
+            border-radius:0 var(--r-sm) var(--r-sm) 0;padding:.85rem 1rem;}}
+  .insight.fix{{border-left-color:var(--green);}}
+  .insight.amb{{border-left-color:var(--amber);}}
+  .insight h4{{font-size:13px;font-weight:600;margin-bottom:4px;}}
+  .insight p{{font-size:12px;color:var(--text2);line-height:1.55;}}
+  .stat-compare{{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:8px;}}
+  .sc-val{{font-size:20px;font-weight:600;}} .sc-lbl{{font-size:10px;color:var(--text3);margin-top:2px;}}
+  .sc-vs{{font-size:11px;color:var(--text3);text-align:center;}}
+  .scroll{{overflow-x:auto;}}
+  .phase-pill{{display:inline-flex;gap:6px;flex-wrap:wrap;}}
+  .dot{{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:3px;vertical-align:middle;}}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>France WC 2022 — Advanced Analysis</h1>
+  <p class="sub">Three deep dives: Mbappé involvement · Shot quality by phase · Passing network structure</p>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('mbappe')">Mbappé involvement</button>
+    <button class="tab" onclick="showTab('shots')">Shot quality</button>
+    <button class="tab" onclick="showTab('network')">Passing network</button>
+    <button class="tab" onclick="showTab('findings')">Key findings</button>
+  </div>
+
+  <!-- ═══════════ TAB 1 — MBAPPE INVOLVEMENT ═══════════ -->
+  <div id="tab-mbappe" class="tab-content active">
+
+    <div class="section">
+      <div class="stitle">headline — sequences with vs without Mbappé</div>
+      <div class="g4">
+        <div class="card kpi grn">
+          <div class="kpi-lbl">Shots per seq — WITH Mbappé</div>
+          <div class="kpi-val" id="kpi-shots-with">—</div>
+          <div class="kpi-sub">tournament average across all games</div>
+        </div>
+        <div class="card kpi red">
+          <div class="kpi-lbl">Shots per seq — WITHOUT Mbappé</div>
+          <div class="kpi-val" id="kpi-shots-without">—</div>
+          <div class="kpi-sub" id="kpi-shots-ratio">— × more likely with him</div>
+        </div>
+        <div class="card kpi grn">
+          <div class="kpi-lbl">Goals per seq — WITH Mbappé</div>
+          <div class="kpi-val" id="kpi-goals-with">—</div>
+          <div class="kpi-sub" id="kpi-goals-ratio">vs without</div>
+        </div>
+        <div class="card kpi amb">
+          <div class="kpi-lbl">Lines broken per seq — WITH</div>
+          <div class="kpi-val" id="kpi-lb-with">—</div>
+          <div class="kpi-sub" id="kpi-lb-ratio">vs without</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">shots per sequence  with vs without Mbappé by game</div>
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">Shots per sequence by game</div>
+          <div class="card-sub">Green = Mbappé involved · Red = not involved. Higher = more shots per attacking sequence.</div>
+          <div class="ch ch-300"><canvas id="chartInvShots"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Pass completion & lines broken per sequence</div>
+          <div class="card-sub">Left axis = pass completion (lines). Right not shown — lines broken bars. Both with vs without.</div>
+          <div class="ch ch-300"><canvas id="chartInvComp"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">passes aimed at Mbappé — success rate by phase</div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title">Game start</div>
+          <div class="card-sub">Passes targeted at Mbappé and his own passing</div>
+          <div style="margin-top:8px;">
+            <div style="margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Passes aimed at Mbappé</div>
+              <div style="font-size:24px;font-weight:600;" id="iso-to-open">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-to-open-pct">reached him</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Mbappé's own passes</div>
+              <div style="font-size:24px;font-weight:600;" id="iso-mb-open">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-mb-open-pct">completion</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">After France goal</div>
+          <div class="card-sub">Passes targeted at Mbappé and his own passing</div>
+          <div style="margin-top:8px;">
+            <div style="margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Passes aimed at Mbappé</div>
+              <div style="font-size:24px;font-weight:600;" id="iso-to-fra">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-to-fra-pct">reached him</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Mbappé's own passes</div>
+              <div style="font-size:24px;font-weight:600;" id="iso-mb-fra">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-mb-fra-pct">completion</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">After opponent goal</div>
+          <div class="card-sub">Passes targeted at Mbappé and his own passing</div>
+          <div style="margin-top:8px;">
+            <div style="margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Passes aimed at Mbappé</div>
+              <div style="font-size:24px;font-weight:600;color:var(--amber);" id="iso-to-opp">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-to-opp-pct">reached him</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Mbappé's own passes</div>
+              <div style="font-size:24px;font-weight:600;color:var(--red);" id="iso-mb-opp">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-mb-opp-pct">completion</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">per-game breakdown table</div>
+      <div class="card scroll">
+        <table>
+          <thead>
+            <tr>
+              <th rowspan="2">Match</th>
+              <th colspan="5" style="text-align:center;color:var(--green);">WITH Mbappé</th>
+              <th colspan="5" style="text-align:center;color:var(--red);">WITHOUT Mbappé</th>
+            </tr>
+            <tr>
+              <th>Seqs</th><th>Shots/seq</th><th>Goals/seq</th><th>LB/seq</th><th>Pass%</th>
+              <th>Seqs</th><th>Shots/seq</th><th>Goals/seq</th><th>LB/seq</th><th>Pass%</th>
+            </tr>
+          </thead>
+          <tbody>{inv_rows}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 2 — SHOT QUALITY ═══════════ -->
+  <div id="tab-shots" class="tab-content">
+
+    <div class="section">
+      <div class="stitle">Mbappé shot outcomes by phase</div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title">Game start phases</div>
+          <div class="card-sub">Before any goal in the match</div>
+          <div style="margin-top:10px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Total shots</span>
+              <span style="font-weight:600;" id="sq-open-n">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Goals</span>
+              <span style="font-weight:600;color:var(--green);" id="sq-open-g">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">On target</span>
+              <span style="font-weight:600;color:var(--blue);" id="sq-open-ot">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+              <span style="font-size:11px;color:var(--text2);">Under pressure</span>
+              <span style="font-weight:600;color:var(--amber);" id="sq-open-pr">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">After France score</div>
+          <div class="card-sub">Phases where France scored most recently</div>
+          <div style="margin-top:10px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Total shots</span>
+              <span style="font-weight:600;" id="sq-fra-n">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Goals</span>
+              <span style="font-weight:600;color:var(--green);" id="sq-fra-g">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">On target</span>
+              <span style="font-weight:600;color:var(--blue);" id="sq-fra-ot">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+              <span style="font-size:11px;color:var(--text2);">Under pressure</span>
+              <span style="font-weight:600;color:var(--amber);" id="sq-fra-pr">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">After opponent scores</div>
+          <div class="card-sub">Chasing phases — France need a goal</div>
+          <div style="margin-top:10px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Total shots</span>
+              <span style="font-weight:600;" id="sq-opp-n">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Goals</span>
+              <span style="font-weight:600;color:var(--green);" id="sq-opp-g">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">On target</span>
+              <span style="font-weight:600;color:var(--blue);" id="sq-opp-ot">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+              <span style="font-size:11px;color:var(--text2);">Under pressure</span>
+              <span style="font-weight:600;color:var(--amber);" id="sq-opp-pr">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">shot quality comparison chart</div>
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">Shot outcomes by phase (Mbappé)</div>
+          <div class="card-sub">% of shots in each category, per phase type</div>
+          <div class="ch ch-300"><canvas id="chartShotOutcomes"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Pressure rate vs goal rate by phase</div>
+          <div class="card-sub">Mbappé scores more when chasing despite similar pressure — suggests heightened focus</div>
+          <div class="ch ch-300"><canvas id="chartShotPressure"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">all Mbappé shots — full log</div>
+      <div class="card scroll">
+        <table>
+          <thead>
+            <tr><th>Match</th><th>Time</th><th>Phase</th><th>Outcome</th><th>Pressed</th></tr>
+          </thead>
+          <tbody id="shot-log-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 3 — PASSING NETWORK ═══════════ -->
+  <div id="tab-network" class="tab-content">
+
+    <div class="section">
+      <div class="stitle">player pass involvement by phase — tournament total</div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title">Game start</div>
+          <div class="card-sub">Completed passes made + received</div>
+          <div class="ch ch-340"><canvas id="chartNetOpen"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">After France goal</div>
+          <div class="card-sub">Completed passes made + received</div>
+          <div class="ch ch-340"><canvas id="chartNetFra"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">After opponent goal</div>
+          <div class="card-sub">Completed passes made + received</div>
+          <div class="ch ch-340"><canvas id="chartNetOpp"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">Tchouaméni pass targets by phase (he is France's top distributor)</div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title">Game start — Tchouaméni targets</div>
+          <div class="card-sub">Who he passes to when France are in their natural shape</div>
+          <div class="ch ch-260"><canvas id="chartTchouOpen"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">After France goal — Tchouaméni targets</div>
+          <div class="card-sub">Target shift after France score</div>
+          <div class="ch ch-260"><canvas id="chartTchouFra"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">After opp goal — Tchouaméni targets</div>
+          <div class="card-sub">Who he turns to when France are chasing — note Mbappé rise</div>
+          <div class="ch ch-260"><canvas id="chartTchouOpp"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">Tchouaméni → Mbappé pass completion by phase</div>
+      <div class="card">
+        <div class="card-title">Key link quality — Tchouaméni to Mbappé</div>
+        <div class="card-sub">When France chase goals, Tchouaméni targets Mbappé more — but the pass completion drops</div>
+        <div class="ch ch-260"><canvas id="chartTchouMbappe"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 4 — KEY FINDINGS ═══════════ -->
+  <div id="tab-findings" class="tab-content">
+
+    <div class="section">
+      <div class="stitle">analysis 1 — Mbappé involvement</div>
+      <div class="g2">
+        <div class="insight fix">
+          <h4>France are a completely different attacking team with Mbappé involved</h4>
+          <p>Sequences involving Mbappé produce <span id="find-shots-ratio">—</span>× more shots per sequence
+          and <span id="find-goals-ratio">—</span>× more goals per sequence than those without him.
+          Lines broken per sequence is also dramatically higher with his involvement.
+          This is the single biggest tactical dependency in the dataset.</p>
+        </div>
+        <div class="insight">
+          <h4>Pass delivery to Mbappé degrades when France chase goals</h4>
+          <p>When France are behind, passes aimed at Mbappé succeed at 71%, which is slightly better than after France
+          score (67%), but his own pass completion drops to 76% (vs 88–90% in other phases).
+          Under pressure he is receiving less cleanly and passing less accurately.
+          This is the data signature of isolation rather than connection.</p>
+        </div>
+        <div class="insight fix">
+          <h4>Without Mbappé, France have almost no attacking threat</h4>
+          <p>Sequences without Mbappé involvement average 0.014–0.058 shots per sequence across games,
+          versus 0.143–0.348 with him. In the Tunisia and Argentina games, where France struggled most,
+          the without-Mbappé sequences were the least productive of the tournament.
+          France's attacking output is highly concentrated in one player.</p>
+        </div>
+        <div class="insight amb">
+          <h4>Implication: neutralising Mbappé neutralises France</h4>
+          <p>Morocco (0-0 until 79') and Tunisia (0-0 for whole regulation) both showed that when Mbappé
+          is held without involvement, France's without-Mbappé sequences do not compensate.
+          The pass network data shows France do not have a reliable alternative attacking route.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">analysis 2 — shot quality by phase</div>
+      <div class="g2">
+        <div class="insight fix">
+          <h4>Mbappé is most lethal when chasing: 42% goal rate after conceding</h4>
+          <p>After the opponent scores, Mbappé converts 42% of his shots into goals (3 goals from 7 shots).
+          This is higher than after France score (25%, 4 from 16) or at game start (14%, 1 from 7).
+          His individual quality actually rises under pressure; the team's problem is structural,
+          not Mbappé's personal form.</p>
+        </div>
+        <div class="insight">
+          <h4>Most shots come after France score, but conversion is lower</h4>
+          <p>16 of Mbappé's 30 shots came in after-France-goal phases. Despite the volume,
+          conversion was only 25% and 68% of those shots came under pressure, the highest pressed rate
+          of any phase. France may be playing faster and more directly after scoring rather than
+          building cleaner chances for him.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">analysis 3 — passing network</div>
+      <div class="g2">
+        <div class="insight">
+          <h4>Tchouaméni is France's central hub: but his targeting shifts when chasing</h4>
+          <p>Tchouaméni is the #1 pass distributor in all three phase types, accounting for 10–14%
+          of all completed pass involvement. Critically, when France are chasing goals he targets
+          Mbappé 15 times (vs 12 in game start, becoming his 2nd-most-targeted player); 
+          but the Tchouaméni→Mbappé completion rate falls when the pressure is highest.</p>
+        </div>
+        <div class="insight fix">
+          <h4>Griezmann becomes more central after France score, a tactical strength</h4>
+          <p>In after-France-goal phases, Griezmann rises from 6th to 3rd in pass involvement.
+          He links play more actively when France control the game. His involvement in calmer
+          phases correlates with France's safest tactical periods. The network becomes
+          more balanced and less Mbappé-dependent when ahead.</p>
+        </div>
+        <div class="insight">
+          <h4>When chasing, Varane and Kounde drop in involvement, and the wide defenders recede</h4>
+          <p>Varane drops from 2nd overall (game start) to 9th (after opp goal). Kounde drops
+          from 5th to 8th. When France need a goal, the full-backs and centre-backs contribute less
+          to build-up. France become more vertical and central, bypassing the wide defensive
+          outlets. This compresses the attack and makes them more predictable.</p>
+        </div>
+        <div class="insight amb">
+          <h4>Camavinga enters the network when chasing, a deliberate adjustment</h4>
+          <p>Camavinga appears in the top 10 only in after-opponent-goal phases (4th among
+          non-starters, 10th overall), reflecting his role as an impact substitute when France
+          need urgency. His presence shifts the network toward more central distribution.
+          Whether this is sufficiently effective is not clear from pass counts alone.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const D = {chart_data};
+
+function showTab(n){{
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+n).classList.add('active');
+  event.target.classList.add('active');
+}}
+
+const TC = {{
+  plugins:{{legend:{{display:false}},tooltip:{{backgroundColor:'#1a1a1a',titleColor:'#f0f0f0',bodyColor:'#999',borderColor:'#333',borderWidth:1}}}},
+  scales:{{x:{{grid:{{color:'rgba(255,255,255,0.05)'}},ticks:{{color:'#666'}}}},y:{{grid:{{color:'rgba(255,255,255,0.05)'}},ticks:{{color:'#666'}}}}}}
+}};
+
+// ── KPIs ──
+const tsWS = D.total_with_shots/Math.max(D.total_with_seqs,1);
+const tsWO = D.total_wo_shots/Math.max(D.total_wo_seqs,1);
+const tgWS = D.total_with_goals/Math.max(D.total_with_seqs,1);
+const tgWO = D.total_wo_goals/Math.max(D.total_wo_seqs,1);
+const tlbW = D.lb_with.reduce((a,b)=>a+b,0)/D.n_with.reduce((a,b)=>a+b,0);
+const tlbO = D.lb_without.reduce((a,b)=>a+b,0)/D.n_without.reduce((a,b)=>a+b,0);
+const shotRatio = (tsWS/Math.max(tsWO,0.001)).toFixed(1);
+const goalRatio = tgWO>0?(tgWS/tgWO).toFixed(1):'∞';
+
+document.getElementById('kpi-shots-with').textContent   = tsWS.toFixed(3);
+document.getElementById('kpi-shots-without').textContent= tsWO.toFixed(3);
+document.getElementById('kpi-shots-ratio').textContent  = shotRatio+'× more shots per seq with Mbappé';
+document.getElementById('kpi-goals-with').textContent   = tgWS.toFixed(3);
+document.getElementById('kpi-goals-ratio').textContent  = goalRatio+'× vs without Mbappé';
+document.getElementById('kpi-lb-with').textContent      = tlbW.toFixed(3);
+document.getElementById('kpi-lb-ratio').textContent     = (tlbW/Math.max(tlbO,0.001)).toFixed(1)+'× vs without';
+document.getElementById('find-shots-ratio').textContent = shotRatio;
+document.getElementById('find-goals-ratio').textContent = goalRatio;
+
+// ── Isolation ──
+['open','fra','opp'].forEach((k,i)=>{{
+  const pt = ['opening','after_fra','after_opp'][i];
+  const d = D.isolation[pt];
+  document.getElementById('iso-to-'+k).textContent = d.to_mb;
+  document.getElementById('iso-to-'+k+'-pct').textContent = d.to_mb_pct+'% reached him';
+  document.getElementById('iso-mb-'+k).textContent = d.mb_made;
+  document.getElementById('iso-mb-'+k+'-pct').textContent = d.mb_comp_pct+'% completion';
+}});
+
+// ── Shot quality cards ──
+[['open','opening'],['fra','after_fra'],['opp','after_opp']].forEach(([k,pt])=>{{
+  const q=D.shot_quality[pt];
+  document.getElementById('sq-'+k+'-n').textContent =q.n+' shots';
+  document.getElementById('sq-'+k+'-g').textContent =q.goals+' ('+q.goal_pct+'%)';
+  document.getElementById('sq-'+k+'-ot').textContent=q.on_target+' ('+q.on_tgt_pct+'%)';
+  document.getElementById('sq-'+k+'-pr').textContent=q.pressed+' ('+q.pressed_pct+'%)';
+}});
+
+// ── Shot log ──
+const OUTCOME_LABEL={{'G':'Goal','S':'Saved','F':'Saved','B':'Blocked','O':'Off target','C':'Off target'}};
+const OUTCOME_COL={{'G':'#27ae60','S':'#3498db','F':'#3498db','B':'#f39c12','O':'#e74c3c','C':'#e74c3c'}};
+const PHASE_COL={{'opening':'#888','after_fra':'#27ae60','after_opp':'#e74c3c'}};
+const PHASE_LBL={{'opening':'Game start','after_fra':'After Fra goal','after_opp':'After opp goal'}};
+const tbody=document.getElementById('shot-log-body');
+D.all_shots.forEach(s=>{{
+  const tr=document.createElement('tr');
+  const oc=OUTCOME_COL[s.outcome]||'#888';
+  const pc=PHASE_COL[s.phase];
+  tr.innerHTML=`<td><strong>${{s.label}}</strong></td><td>${{s.fmt}}</td>
+    <td><span class="badge" style="background:${{pc}}22;color:${{pc}};">${{PHASE_LBL[s.phase]}}</span></td>
+    <td><span class="badge" style="background:${{oc}}22;color:${{oc}};">${{OUTCOME_LABEL[s.outcome]||s.outcome}}</span></td>
+    <td>${{s.pressed?'<span class="badge b-amb">Pressed</span>':'<span class="badge b-grn">Free</span>'}}</td>`;
+  tbody.appendChild(tr);
+}});
+
+// ── Chart helpers ──
+const COLORS=[
+  '#3498db','#e74c3c','#27ae60','#f39c12','#9b59b6',
+  '#1abc9c','#e67e22','#e91e63','#00bcd4','#8bc34a','#ff5722','#607d8b'
+];
+
+// ── Involvement: shots ──
+new Chart(document.getElementById('chartInvShots'),{{
+  type:'bar',
+  data:{{labels:D.game_labels,datasets:[
+    {{label:'With Mbappé', data:D.shots_with,  backgroundColor:'rgba(39,174,96,0.75)',barPercentage:.35}},
+    {{label:'Without',     data:D.shots_without,backgroundColor:'rgba(231,76,60,0.75)',barPercentage:.35}},
+  ]}},
+  options:{{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{{...TC.plugins,legend:{{display:true,labels:{{color:'#999',font:{{size:10}}}}}},
+      tooltip:{{...TC.plugins.tooltip,callbacks:{{label:c=>c.dataset.label+': '+c.parsed.y.toFixed(3)+' shots/seq'}}}}}},
+    scales:{{x:{{...TC.scales.x,ticks:{{color:'#666',font:{{size:10}}}}}},
+             y:{{...TC.scales.y,title:{{display:true,text:'shots per sequence',color:'#666',font:{{size:10}}}}}}}}
+  }}
+}});
+
+// ── Involvement: pass comp ──
+new Chart(document.getElementById('chartInvComp'),{{
+  type:'bar',
+  data:{{labels:D.game_labels,datasets:[
+    {{label:'Pass% with Mbappé',  data:D.comp_with,   backgroundColor:'rgba(39,174,96,0.75)', barPercentage:.35}},
+    {{label:'Pass% without',      data:D.comp_without, backgroundColor:'rgba(231,76,60,0.75)', barPercentage:.35}},
+  ]}},
+  options:{{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{{...TC.plugins,legend:{{display:true,labels:{{color:'#999',font:{{size:10}}}}}}}},
+    scales:{{x:{{...TC.scales.x,ticks:{{color:'#666',font:{{size:10}}}}}},
+             y:{{...TC.scales.y,min:50,max:100,title:{{display:true,text:'pass completion %',color:'#666',font:{{size:10}}}}}}}}
+  }}
+}});
+
+// ── Shot outcomes by phase ──
+const phases3=['opening','after_fra','after_opp'];
+const pLabels=['Game start','After Fra goal','After Opp goal'];
+new Chart(document.getElementById('chartShotOutcomes'),{{
+  type:'bar',
+  data:{{labels:pLabels,datasets:[
+    {{label:'Goal %',      data:phases3.map(p=>D.shot_quality[p].goal_pct),  backgroundColor:'rgba(39,174,96,0.8)'}},
+    {{label:'On target %', data:phases3.map(p=>D.shot_quality[p].on_tgt_pct-D.shot_quality[p].goal_pct), backgroundColor:'rgba(52,152,219,0.7)'}},
+    {{label:'Blocked/off', data:phases3.map(p=>100-D.shot_quality[p].on_tgt_pct), backgroundColor:'rgba(231,76,60,0.5)'}},
+  ]}},
+  options:{{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{{...TC.plugins,legend:{{display:true,labels:{{color:'#999',font:{{size:10}}}}}}}},
+    scales:{{x:{{...TC.scales.x,stacked:true,ticks:{{color:'#666'}}}},y:{{...TC.scales.y,stacked:true,max:100,title:{{display:true,text:'% of shots',color:'#666',font:{{size:10}}}}}}}}
+  }}
+}});
+
+// ── Pressure vs goals ──
+new Chart(document.getElementById('chartShotPressure'),{{
+  type:'bar',
+  data:{{labels:pLabels,datasets:[
+    {{label:'Pressed %',  data:phases3.map(p=>D.shot_quality[p].pressed_pct), backgroundColor:'rgba(243,156,18,0.75)', barPercentage:.35, yAxisID:'y'}},
+    {{label:'Goal %',     data:phases3.map(p=>D.shot_quality[p].goal_pct),    backgroundColor:'rgba(39,174,96,0.75)',  barPercentage:.35, yAxisID:'y'}},
+  ]}},
+  options:{{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{{...TC.plugins,legend:{{display:true,labels:{{color:'#999',font:{{size:10}}}}}}}},
+    scales:{{x:{{...TC.scales.x,ticks:{{color:'#666'}}}},
+             y:{{...TC.scales.y,max:100,title:{{display:true,text:'%',color:'#666',font:{{size:10}}}}}}}}
+  }}
+}});
+
+// ── Network horizontal bars ──
+function mkNetChart(canvasId, pt){{
+  const data=D.network[pt].players;
+  new Chart(document.getElementById(canvasId),{{
+    type:'bar',
+    data:{{
+      labels:data.map(p=>p.name),
+      datasets:[
+        {{label:'Made',     data:data.map(p=>p.made),     backgroundColor:'rgba(52,152,219,0.75)'}},
+        {{label:'Received', data:data.map(p=>p.received), backgroundColor:'rgba(155,89,182,0.6)'}},
+      ]
+    }},
+    options:{{...TC,indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      plugins:{{...TC.plugins,legend:{{display:true,labels:{{color:'#999',font:{{size:9}}}}}}}},
+      scales:{{
+        x:{{...TC.scales.x,stacked:true,ticks:{{color:'#666',font:{{size:9}}}}}},
+        y:{{...TC.scales.y,stacked:true,ticks:{{color:'#ccc',font:{{size:10}}}}}}
+      }}
+    }}
+  }});
+}}
+mkNetChart('chartNetOpen','opening');
+mkNetChart('chartNetFra','after_fra');
+mkNetChart('chartNetOpp','after_opp');
+
+// ── Tchouaméni target charts ──
+function mkTchouChart(canvasId, pt){{
+  const data=D.tchouameni[pt];
+  const cols=data.map((_,i)=>COLORS[i%COLORS.length]);
+  new Chart(document.getElementById(canvasId),{{
+    type:'bar',
+    data:{{
+      labels:data.map(d=>d.name),
+      datasets:[
+        {{label:'Total passes', data:data.map(d=>d.total), backgroundColor:cols.map(c=>c+'BB')}},
+      ]
+    }},
+    options:{{...TC,indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      plugins:{{...TC.plugins,tooltip:{{...TC.plugins.tooltip,
+        callbacks:{{label:ctx=>{{
+          const d=data[ctx.dataIndex];
+          return [' '+d.total+' passes',d.pct+'% completion'];
+        }}}}}}}},
+      scales:{{
+        x:{{...TC.scales.x,ticks:{{color:'#666',font:{{size:9}}}}}},
+        y:{{...TC.scales.y,ticks:{{color:'#ccc',font:{{size:10}}}}}}
+      }}
+    }}
+  }});
+}}
+mkTchouChart('chartTchouOpen','opening');
+mkTchouChart('chartTchouFra','after_fra');
+mkTchouChart('chartTchouOpp','after_opp');
+
+// ── Tchouaméni → Mbappé by phase ──
+new Chart(document.getElementById('chartTchouMbappe'),{{
+  type:'bar',
+  data:{{
+    labels:pLabels,
+    datasets:[
+      {{label:'Passes to Mbappé', data:D.tchouameni.opening.concat(D.tchouameni.after_fra).concat(D.tchouameni.after_opp)
+        .reduce((acc,cur,_,arr)=>acc,// placeholder
+        (() => {{
+          const find=(pt)=>{{const r=D.tchouameni[pt].find(d=>d.name==='Mbappé'); return r||{{total:0,comp:0,pct:0}};}};
+          return [find('opening').total, find('after_fra').total, find('after_opp').total];
+        }})()),
+        backgroundColor:['rgba(39,174,96,0.7)','rgba(243,156,18,0.7)','rgba(231,76,60,0.7)'],barPercentage:.45,yAxisID:'y'
+      }},
+      {{label:'Completion %', data:(()=>{{
+          const find=(pt)=>{{const r=D.tchouameni[pt].find(d=>d.name==='Mbappé'); return r||{{total:0,comp:0,pct:0}};}};
+          return [find('opening').pct, find('after_fra').pct, find('after_opp').pct];
+        }})(),
+        type:'line',borderColor:'#f0f0f0',backgroundColor:'transparent',
+        pointBackgroundColor:'#f0f0f0',borderWidth:2,pointRadius:5,
+        yAxisID:'y2',tension:0.3
+      }},
+    ]
+  }},
+  options:{{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{{...TC.plugins,legend:{{display:true,labels:{{color:'#999',font:{{size:10}}}}}}}},
+    scales:{{
+      x:{{...TC.scales.x,ticks:{{color:'#666'}}}},
+      y:{{...TC.scales.y,title:{{display:true,text:'Passes to Mbappé',color:'#666',font:{{size:10}}}},position:'left'}},
+      y2:{{grid:{{display:false}},ticks:{{color:'#999'}},title:{{display:true,text:'Completion %',color:'#999',font:{{size:10}}}},position:'right',min:0,max:100}}
+    }}
+  }}
+}});
+</script>
+</body>
+</html>"""
+
+
+
+# Main
+if __name__ == "__main__":
+    print("Computing Mbappé involvement by sequence...")
+    inv_data = compute_mbappe_involvement()
+
+    print("Computing Mbappé shot quality by phase...")
+    shot_data = compute_mbappe_shots_by_phase()
+
+    print("Computing pass isolation metrics...")
+    isolation_data = compute_mbappe_pass_isolation()
+
+    print("Computing passing network centrality...")
+    network_data = compute_network_centrality()
+
+    print("Computing Tchouaméni pass targets...")
+    tchou_data = compute_tchouameni_targets()
+
+    print("Building HTML dashboard...")
+    html = build_html(inv_data, shot_data, isolation_data, network_data, tchou_data)
+
+    os.makedirs(os.path.dirname(OUT_FILE) if os.path.dirname(OUT_FILE) else ".", exist_ok=True)
+    with open(OUT_FILE, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    print(f"\nDone — open in any browser:\n  {OUT_FILE}")
