@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>France WC 2022 — Advanced Analysis Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:#0f0f0f; --surface:#1a1a1a; --surface2:#242424;
+    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.13);
+    --text:#f0f0f0; --text2:#999; --text3:#555;
+    --red:#e74c3c; --red-bg:rgba(231,76,60,0.1);
+    --amber:#f39c12; --amber-bg:rgba(243,156,18,0.1);
+    --green:#27ae60; --green-bg:rgba(39,174,96,0.1);
+    --blue:#3498db; --blue-bg:rgba(52,152,219,0.1);
+    --purple:#9b59b6; --purple-bg:rgba(155,89,182,0.1);
+    --r:10px; --r-sm:6px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.5;}
+  .page{max-width:1400px;margin:0 auto;padding:2rem 1.5rem 4rem;}
+  h1{font-size:24px;font-weight:600;margin-bottom:4px;}
+  .sub{color:var(--text2);font-size:13px;margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:.5px solid var(--border2);}
+  .section{margin-bottom:2.5rem;}
+  .stitle{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:1rem;padding-bottom:6px;border-bottom:.5px solid var(--border);}
+  .card{background:var(--surface);border:.5px solid var(--border2);border-radius:var(--r);padding:1.2rem;}
+  .card-title{font-size:13px;font-weight:600;margin-bottom:3px;}
+  .card-sub{font-size:11px;color:var(--text2);margin-bottom:1rem;}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+  .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  @media(max-width:900px){.g2,.g3,.g4{grid-template-columns:1fr;}}
+  .kpi{padding:1rem 1.1rem;}
+  .kpi-lbl{font-size:11px;color:var(--text2);margin-bottom:5px;}
+  .kpi-val{font-size:26px;font-weight:600;line-height:1;margin-bottom:3px;}
+  .kpi-sub{font-size:11px;color:var(--text3);}
+  .kpi.red .kpi-val{color:var(--red);} .kpi.grn .kpi-val{color:var(--green);}
+  .kpi.amb .kpi-val{color:var(--amber);} .kpi.blue .kpi-val{color:var(--blue);}
+  .tabs{display:flex;gap:4px;margin-bottom:1.5rem;flex-wrap:wrap;}
+  .tab{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;
+        border:.5px solid var(--border2);background:transparent;color:var(--text2);transition:all .15s;}
+  .tab:hover{background:var(--surface2);color:var(--text);}
+  .tab.active{background:var(--text);color:var(--bg);border-color:var(--text);}
+  .tab-content{display:none;} .tab-content.active{display:block;}
+  .ch{position:relative;width:100%;}
+  .ch-260{height:260px;} .ch-300{height:300px;} .ch-340{height:340px;} .ch-400{height:400px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);
+      padding:7px 9px;border-bottom:.5px solid var(--border2);text-align:left;white-space:nowrap;}
+  td{padding:6px 9px;border-bottom:.5px solid var(--border);color:var(--text);vertical-align:middle;}
+  tr:last-child td{border-bottom:none;} tr:hover td{background:var(--surface2);}
+  .badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;}
+  .b-grn{background:var(--green-bg);color:var(--green);}
+  .b-red{background:var(--red-bg);color:var(--red);}
+  .b-amb{background:var(--amber-bg);color:var(--amber);}
+  .b-blue{background:var(--blue-bg);color:var(--blue);}
+  .b-pur{background:var(--purple-bg);color:var(--purple);}
+  .insight{border-left:3px solid var(--red);background:var(--surface);
+            border-radius:0 var(--r-sm) var(--r-sm) 0;padding:.85rem 1rem;}
+  .insight.fix{border-left-color:var(--green);}
+  .insight.amb{border-left-color:var(--amber);}
+  .insight h4{font-size:13px;font-weight:600;margin-bottom:4px;}
+  .insight p{font-size:12px;color:var(--text2);line-height:1.55;}
+  .stat-compare{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:8px;}
+  .sc-val{font-size:20px;font-weight:600;} .sc-lbl{font-size:10px;color:var(--text3);margin-top:2px;}
+  .sc-vs{font-size:11px;color:var(--text3);text-align:center;}
+  .scroll{overflow-x:auto;}
+  .phase-pill{display:inline-flex;gap:6px;flex-wrap:wrap;}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:3px;vertical-align:middle;}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>France WC 2022 — Advanced Analysis</h1>
+  <p class="sub">Three deep dives: Mbappé involvement · Shot quality by phase · Passing network structure</p>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('mbappe')">Mbappé involvement</button>
+    <button class="tab" onclick="showTab('shots')">Shot quality</button>
+    <button class="tab" onclick="showTab('network')">Passing network</button>
+    <button class="tab" onclick="showTab('findings')">Key findings</button>
+  </div>
+
+  <!-- ═══════════ TAB 1 — MBAPPE INVOLVEMENT ═══════════ -->
+  <div id="tab-mbappe" class="tab-content active">
+
+    <div class="section">
+      <div class="stitle">headline — sequences with vs without Mbappé</div>
+      <div class="g4">
+        <div class="card kpi grn">
+          <div class="kpi-lbl">Shots per seq — WITH Mbappé</div>
+          <div class="kpi-val" id="kpi-shots-with">—</div>
+          <div class="kpi-sub">tournament average across all games</div>
+        </div>
+        <div class="card kpi red">
+          <div class="kpi-lbl">Shots per seq — WITHOUT Mbappé</div>
+          <div class="kpi-val" id="kpi-shots-without">—</div>
+          <div class="kpi-sub" id="kpi-shots-ratio">— × more likely with him</div>
+        </div>
+        <div class="card kpi grn">
+          <div class="kpi-lbl">Goals per seq — WITH Mbappé</div>
+          <div class="kpi-val" id="kpi-goals-with">—</div>
+          <div class="kpi-sub" id="kpi-goals-ratio">vs without</div>
+        </div>
+        <div class="card kpi amb">
+          <div class="kpi-lbl">Lines broken per seq — WITH</div>
+          <div class="kpi-val" id="kpi-lb-with">—</div>
+          <div class="kpi-sub" id="kpi-lb-ratio">vs without</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">shots per sequence  with vs without Mbappé by game</div>
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">Shots per sequence by game</div>
+          <div class="card-sub">Green = Mbappé involved · Red = not involved. Higher = more shots per attacking sequence.</div>
+          <div class="ch ch-300"><canvas id="chartInvShots"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Pass completion & lines broken per sequence</div>
+          <div class="card-sub">Left axis = pass completion (lines). Right not shown — lines broken bars. Both with vs without.</div>
+          <div class="ch ch-300"><canvas id="chartInvComp"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">passes aimed at Mbappé — success rate by phase</div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title">Game start</div>
+          <div class="card-sub">Passes targeted at Mbappé and his own passing</div>
+          <div style="margin-top:8px;">
+            <div style="margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Passes aimed at Mbappé</div>
+              <div style="font-size:24px;font-weight:600;" id="iso-to-open">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-to-open-pct">reached him</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Mbappé's own passes</div>
+              <div style="font-size:24px;font-weight:600;" id="iso-mb-open">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-mb-open-pct">completion</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">After France goal</div>
+          <div class="card-sub">Passes targeted at Mbappé and his own passing</div>
+          <div style="margin-top:8px;">
+            <div style="margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Passes aimed at Mbappé</div>
+              <div style="font-size:24px;font-weight:600;" id="iso-to-fra">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-to-fra-pct">reached him</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Mbappé's own passes</div>
+              <div style="font-size:24px;font-weight:600;" id="iso-mb-fra">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-mb-fra-pct">completion</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">After opponent goal</div>
+          <div class="card-sub">Passes targeted at Mbappé and his own passing</div>
+          <div style="margin-top:8px;">
+            <div style="margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Passes aimed at Mbappé</div>
+              <div style="font-size:24px;font-weight:600;color:var(--amber);" id="iso-to-opp">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-to-opp-pct">reached him</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Mbappé's own passes</div>
+              <div style="font-size:24px;font-weight:600;color:var(--red);" id="iso-mb-opp">—</div>
+              <div style="font-size:11px;color:var(--text3);" id="iso-mb-opp-pct">completion</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">per-game breakdown table</div>
+      <div class="card scroll">
+        <table>
+          <thead>
+            <tr>
+              <th rowspan="2">Match</th>
+              <th colspan="5" style="text-align:center;color:var(--green);">WITH Mbappé</th>
+              <th colspan="5" style="text-align:center;color:var(--red);">WITHOUT Mbappé</th>
+            </tr>
+            <tr>
+              <th>Seqs</th><th>Shots/seq</th><th>Goals/seq</th><th>LB/seq</th><th>Pass%</th>
+              <th>Seqs</th><th>Shots/seq</th><th>Goals/seq</th><th>LB/seq</th><th>Pass%</th>
+            </tr>
+          </thead>
+          <tbody>
+        <tr>
+          <td><strong>FRA 4-1 AUS</strong></td>
+          <td>46</td>
+          <td style="color:#27ae60;font-weight:600">0.348</td>
+          <td style="color:#27ae60;font-weight:600">0.065</td>
+          <td style="color:#27ae60;font-weight:600">1.000</td>
+          <td style="color:#27ae60;font-weight:600">94.5%</td>
+          <td>104</td>
+          <td style="color:#e74c3c">0.058</td>
+          <td style="color:#e74c3c">0.010</td>
+          <td style="color:#e74c3c">0.135</td>
+          <td style="color:#e74c3c">80.6%</td>
+        </tr>
+        <tr>
+          <td><strong>FRA 2-1 DEN</strong></td>
+          <td>37</td>
+          <td style="color:#27ae60;font-weight:600">0.297</td>
+          <td style="color:#27ae60;font-weight:600">0.054</td>
+          <td style="color:#27ae60;font-weight:600">0.568</td>
+          <td style="color:#27ae60;font-weight:600">95.9%</td>
+          <td>117</td>
+          <td style="color:#e74c3c">0.077</td>
+          <td style="color:#e74c3c">0.000</td>
+          <td style="color:#e74c3c">0.137</td>
+          <td style="color:#e74c3c">76.5%</td>
+        </tr>
+        <tr>
+          <td><strong>FRA 0-1 TUN</strong></td>
+          <td>25</td>
+          <td style="color:#27ae60;font-weight:600">0.160</td>
+          <td style="color:#27ae60;font-weight:600">0.000</td>
+          <td style="color:#27ae60;font-weight:600">0.600</td>
+          <td style="color:#27ae60;font-weight:600">95.6%</td>
+          <td>168</td>
+          <td style="color:#e74c3c">0.024</td>
+          <td style="color:#e74c3c">0.000</td>
+          <td style="color:#e74c3c">0.315</td>
+          <td style="color:#e74c3c">83.7%</td>
+        </tr>
+        <tr>
+          <td><strong>FRA 3-1 POL</strong></td>
+          <td>41</td>
+          <td style="color:#27ae60;font-weight:600">0.244</td>
+          <td style="color:#27ae60;font-weight:600">0.073</td>
+          <td style="color:#27ae60;font-weight:600">0.780</td>
+          <td style="color:#27ae60;font-weight:600">94.9%</td>
+          <td>117</td>
+          <td style="color:#e74c3c">0.051</td>
+          <td style="color:#e74c3c">0.000</td>
+          <td style="color:#e74c3c">0.111</td>
+          <td style="color:#e74c3c">75.8%</td>
+        </tr>
+        <tr>
+          <td><strong>FRA 2-1 ENG</strong></td>
+          <td>28</td>
+          <td style="color:#27ae60;font-weight:600">0.143</td>
+          <td style="color:#27ae60;font-weight:600">0.036</td>
+          <td style="color:#27ae60;font-weight:600">0.714</td>
+          <td style="color:#27ae60;font-weight:600">93.2%</td>
+          <td>118</td>
+          <td style="color:#e74c3c">0.034</td>
+          <td style="color:#e74c3c">0.008</td>
+          <td style="color:#e74c3c">0.119</td>
+          <td style="color:#e74c3c">74.1%</td>
+        </tr>
+        <tr>
+          <td><strong>FRA 2-0 MAR</strong></td>
+          <td>26</td>
+          <td style="color:#27ae60;font-weight:600">0.346</td>
+          <td style="color:#27ae60;font-weight:600">0.077</td>
+          <td style="color:#27ae60;font-weight:600">0.731</td>
+          <td style="color:#27ae60;font-weight:600">95.7%</td>
+          <td>126</td>
+          <td style="color:#e74c3c">0.040</td>
+          <td style="color:#e74c3c">0.000</td>
+          <td style="color:#e74c3c">0.198</td>
+          <td style="color:#e74c3c">76.2%</td>
+        </tr>
+        <tr>
+          <td><strong>FRA 3-3 ARG (AET)</strong></td>
+          <td>36</td>
+          <td style="color:#27ae60;font-weight:600">0.167</td>
+          <td style="color:#27ae60;font-weight:600">0.083</td>
+          <td style="color:#27ae60;font-weight:600">0.750</td>
+          <td style="color:#27ae60;font-weight:600">89.5%</td>
+          <td>210</td>
+          <td style="color:#e74c3c">0.014</td>
+          <td style="color:#e74c3c">0.000</td>
+          <td style="color:#e74c3c">0.143</td>
+          <td style="color:#e74c3c">75.6%</td>
+        </tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 2 — SHOT QUALITY ═══════════ -->
+  <div id="tab-shots" class="tab-content">
+
+    <div class="section">
+      <div class="stitle">Mbappé shot outcomes by phase</div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title">Game start phases</div>
+          <div class="card-sub">Before any goal in the match</div>
+          <div style="margin-top:10px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Total shots</span>
+              <span style="font-weight:600;" id="sq-open-n">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Goals</span>
+              <span style="font-weight:600;color:var(--green);" id="sq-open-g">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">On target</span>
+              <span style="font-weight:600;color:var(--blue);" id="sq-open-ot">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+              <span style="font-size:11px;color:var(--text2);">Under pressure</span>
+              <span style="font-weight:600;color:var(--amber);" id="sq-open-pr">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">After France score</div>
+          <div class="card-sub">Phases where France scored most recently</div>
+          <div style="margin-top:10px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Total shots</span>
+              <span style="font-weight:600;" id="sq-fra-n">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Goals</span>
+              <span style="font-weight:600;color:var(--green);" id="sq-fra-g">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">On target</span>
+              <span style="font-weight:600;color:var(--blue);" id="sq-fra-ot">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+              <span style="font-size:11px;color:var(--text2);">Under pressure</span>
+              <span style="font-weight:600;color:var(--amber);" id="sq-fra-pr">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">After opponent scores</div>
+          <div class="card-sub">Chasing phases — France need a goal</div>
+          <div style="margin-top:10px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Total shots</span>
+              <span style="font-weight:600;" id="sq-opp-n">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">Goals</span>
+              <span style="font-weight:600;color:var(--green);" id="sq-opp-g">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:11px;color:var(--text2);">On target</span>
+              <span style="font-weight:600;color:var(--blue);" id="sq-opp-ot">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+              <span style="font-size:11px;color:var(--text2);">Under pressure</span>
+              <span style="font-weight:600;color:var(--amber);" id="sq-opp-pr">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">shot quality comparison chart</div>
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">Shot outcomes by phase (Mbappé)</div>
+          <div class="card-sub">% of shots in each category, per phase type</div>
+          <div class="ch ch-300"><canvas id="chartShotOutcomes"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Pressure rate vs goal rate by phase</div>
+          <div class="card-sub">Mbappé scores more when chasing despite similar pressure — suggests heightened focus</div>
+          <div class="ch ch-300"><canvas id="chartShotPressure"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">all Mbappé shots — full log</div>
+      <div class="card scroll">
+        <table>
+          <thead>
+            <tr><th>Match</th><th>Time</th><th>Phase</th><th>Outcome</th><th>Pressed</th></tr>
+          </thead>
+          <tbody id="shot-log-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 3 — PASSING NETWORK ═══════════ -->
+  <div id="tab-network" class="tab-content">
+
+    <div class="section">
+      <div class="stitle">player pass involvement by phase — tournament total</div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title">Game start</div>
+          <div class="card-sub">Completed passes made + received</div>
+          <div class="ch ch-340"><canvas id="chartNetOpen"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">After France goal</div>
+          <div class="card-sub">Completed passes made + received</div>
+          <div class="ch ch-340"><canvas id="chartNetFra"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">After opponent goal</div>
+          <div class="card-sub">Completed passes made + received</div>
+          <div class="ch ch-340"><canvas id="chartNetOpp"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">Tchouaméni pass targets by phase (he is France's top distributor)</div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title">Game start — Tchouaméni targets</div>
+          <div class="card-sub">Who he passes to when France are in their natural shape</div>
+          <div class="ch ch-260"><canvas id="chartTchouOpen"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">After France goal — Tchouaméni targets</div>
+          <div class="card-sub">Target shift after France score</div>
+          <div class="ch ch-260"><canvas id="chartTchouFra"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">After opp goal — Tchouaméni targets</div>
+          <div class="card-sub">Who he turns to when France are chasing — note Mbappé rise</div>
+          <div class="ch ch-260"><canvas id="chartTchouOpp"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">Tchouaméni → Mbappé pass completion by phase</div>
+      <div class="card">
+        <div class="card-title">Key link quality — Tchouaméni to Mbappé</div>
+        <div class="card-sub">When France chase goals, Tchouaméni targets Mbappé more — but the pass completion drops</div>
+        <div class="ch ch-260"><canvas id="chartTchouMbappe"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TAB 4 — KEY FINDINGS ═══════════ -->
+  <div id="tab-findings" class="tab-content">
+
+    <div class="section">
+      <div class="stitle">analysis 1 — Mbappé involvement</div>
+      <div class="g2">
+        <div class="insight fix">
+          <h4>France are a completely different attacking team with Mbappé involved</h4>
+          <p>Sequences involving Mbappé produce <span id="find-shots-ratio">—</span>× more shots per sequence
+          and <span id="find-goals-ratio">—</span>× more goals per sequence than those without him.
+          Lines broken per sequence is also dramatically higher with his involvement.
+          This is the single biggest tactical dependency in the dataset.</p>
+        </div>
+        <div class="insight">
+          <h4>Pass delivery to Mbappé degrades when France chase goals</h4>
+          <p>When France are behind, passes aimed at Mbappé succeed at 71%, which is slightly better than after France
+          score (67%), but his own pass completion drops to 76% (vs 88–90% in other phases).
+          Under pressure he is receiving less cleanly and passing less accurately.
+          This is the data signature of isolation rather than connection.</p>
+        </div>
+        <div class="insight fix">
+          <h4>Without Mbappé, France have almost no attacking threat</h4>
+          <p>Sequences without Mbappé involvement average 0.014–0.058 shots per sequence across games,
+          versus 0.143–0.348 with him. In the Tunisia and Argentina games, where France struggled most,
+          the without-Mbappé sequences were the least productive of the tournament.
+          France's attacking output is highly concentrated in one player.</p>
+        </div>
+        <div class="insight amb">
+          <h4>Implication: neutralising Mbappé neutralises France</h4>
+          <p>Morocco (0-0 until 79') and Tunisia (0-0 for whole regulation) both showed that when Mbappé
+          is held without involvement, France's without-Mbappé sequences do not compensate.
+          The pass network data shows France do not have a reliable alternative attacking route.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">analysis 2 — shot quality by phase</div>
+      <div class="g2">
+        <div class="insight fix">
+          <h4>Mbappé is most lethal when chasing: 42% goal rate after conceding</h4>
+          <p>After the opponent scores, Mbappé converts 42% of his shots into goals (3 goals from 7 shots).
+          This is higher than after France score (25%, 4 from 16) or at game start (14%, 1 from 7).
+          His individual quality actually rises under pressure; the team's problem is structural,
+          not Mbappé's personal form.</p>
+        </div>
+        <div class="insight">
+          <h4>Most shots come after France score, but conversion is lower</h4>
+          <p>16 of Mbappé's 30 shots came in after-France-goal phases. Despite the volume,
+          conversion was only 25% and 68% of those shots came under pressure, the highest pressed rate
+          of any phase. France may be playing faster and more directly after scoring rather than
+          building cleaner chances for him.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">analysis 3 — passing network</div>
+      <div class="g2">
+        <div class="insight">
+          <h4>Tchouaméni is France's central hub: but his targeting shifts when chasing</h4>
+          <p>Tchouaméni is the #1 pass distributor in all three phase types, accounting for 10–14%
+          of all completed pass involvement. Critically, when France are chasing goals he targets
+          Mbappé 15 times (vs 12 in game start, becoming his 2nd-most-targeted player); 
+          but the Tchouaméni→Mbappé completion rate falls when the pressure is highest.</p>
+        </div>
+        <div class="insight fix">
+          <h4>Griezmann becomes more central after France score, a tactical strength</h4>
+          <p>In after-France-goal phases, Griezmann rises from 6th to 3rd in pass involvement.
+          He links play more actively when France control the game. His involvement in calmer
+          phases correlates with France's safest tactical periods. The network becomes
+          more balanced and less Mbappé-dependent when ahead.</p>
+        </div>
+        <div class="insight">
+          <h4>When chasing, Varane and Kounde drop in involvement, and the wide defenders recede</h4>
+          <p>Varane drops from 2nd overall (game start) to 9th (after opp goal). Kounde drops
+          from 5th to 8th. When France need a goal, the full-backs and centre-backs contribute less
+          to build-up. France become more vertical and central, bypassing the wide defensive
+          outlets. This compresses the attack and makes them more predictable.</p>
+        </div>
+        <div class="insight amb">
+          <h4>Camavinga enters the network when chasing, a deliberate adjustment</h4>
+          <p>Camavinga appears in the top 10 only in after-opponent-goal phases (4th among
+          non-starters, 10th overall), reflecting his role as an impact substitute when France
+          need urgency. His presence shifts the network toward more central distribution.
+          Whether this is sufficiently effective is not clear from pass counts alone.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const D = {"game_labels": ["FRA 4-1 AUS", "FRA 2-1 DEN", "FRA 0-1 TUN", "FRA 3-1 POL", "FRA 2-1 ENG", "FRA 2-0 MAR", "FRA 3-3 ARG (AET)"], "shots_with": [0.348, 0.297, 0.16, 0.244, 0.143, 0.346, 0.167], "shots_without": [0.058, 0.077, 0.024, 0.051, 0.034, 0.04, 0.014], "goals_with": [0.065, 0.054, 0.0, 0.073, 0.036, 0.077, 0.083], "goals_without": [0.01, 0.0, 0.0, 0.0, 0.008, 0.0, 0.0], "lb_with": [1.0, 0.568, 0.6, 0.78, 0.714, 0.731, 0.75], "lb_without": [0.135, 0.137, 0.315, 0.111, 0.119, 0.198, 0.143], "comp_with": [94.5, 95.9, 95.6, 94.9, 93.2, 95.7, 89.5], "comp_without": [80.6, 76.5, 83.7, 75.8, 74.1, 76.2, 75.6], "n_with": [46, 37, 25, 41, 28, 26, 36], "n_without": [104, 117, 168, 117, 118, 126, 210], "total_with_shots": 60, "total_with_goals": 14, "total_with_seqs": 239, "total_wo_shots": 37, "total_wo_goals": 2, "total_wo_seqs": 960, "shot_quality": {"opening": {"n": 7, "goals": 1, "on_target": 3, "pressed": 4, "goal_pct": 14, "on_tgt_pct": 43, "pressed_pct": 57}, "after_fra": {"n": 16, "goals": 4, "on_target": 5, "pressed": 11, "goal_pct": 25, "on_tgt_pct": 31, "pressed_pct": 69}, "after_opp": {"n": 7, "goals": 3, "on_target": 4, "pressed": 4, "goal_pct": 43, "on_tgt_pct": 57, "pressed_pct": 57}}, "all_shots": [{"phase": "after_fra", "label": "FRA 4-1 AUS", "fmt": "36:03", "outcome": "C", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_fra", "label": "FRA 4-1 AUS", "fmt": "44:37", "outcome": "O", "goal": false, "on_target": false, "pressed": false}, {"phase": "after_fra", "label": "FRA 4-1 AUS", "fmt": "60:11", "outcome": "B", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_fra", "label": "FRA 4-1 AUS", "fmt": "61:58", "outcome": "B", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_fra", "label": "FRA 4-1 AUS", "fmt": "63:47", "outcome": "B", "goal": false, "on_target": false, "pressed": false}, {"phase": "after_fra", "label": "FRA 4-1 AUS", "fmt": "67:02", "outcome": "G", "goal": true, "on_target": true, "pressed": true}, {"phase": "opening", "label": "FRA 2-1 DEN", "fmt": "39:33", "outcome": "O", "goal": false, "on_target": false, "pressed": false}, {"phase": "opening", "label": "FRA 2-1 DEN", "fmt": "47:21", "outcome": "B", "goal": false, "on_target": false, "pressed": false}, {"phase": "opening", "label": "FRA 2-1 DEN", "fmt": "55:52", "outcome": "S", "goal": false, "on_target": true, "pressed": true}, {"phase": "opening", "label": "FRA 2-1 DEN", "fmt": "60:24", "outcome": "G", "goal": true, "on_target": true, "pressed": true}, {"phase": "after_opp", "label": "FRA 2-1 DEN", "fmt": "85:09", "outcome": "G", "goal": true, "on_target": true, "pressed": true}, {"phase": "after_fra", "label": "FRA 2-1 DEN", "fmt": "90:17", "outcome": "S", "goal": false, "on_target": true, "pressed": true}, {"phase": "after_opp", "label": "FRA 0-1 TUN", "fmt": "88:14", "outcome": "S", "goal": false, "on_target": true, "pressed": true}, {"phase": "after_opp", "label": "FRA 0-1 TUN", "fmt": "92:31", "outcome": "B", "goal": false, "on_target": false, "pressed": false}, {"phase": "opening", "label": "FRA 3-1 POL", "fmt": "34:48", "outcome": "S", "goal": false, "on_target": true, "pressed": false}, {"phase": "after_fra", "label": "FRA 3-1 POL", "fmt": "55:49", "outcome": "B", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_fra", "label": "FRA 3-1 POL", "fmt": "62:41", "outcome": "O", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_fra", "label": "FRA 3-1 POL", "fmt": "73:54", "outcome": "G", "goal": true, "on_target": true, "pressed": false}, {"phase": "after_fra", "label": "FRA 3-1 POL", "fmt": "90:04", "outcome": "G", "goal": true, "on_target": true, "pressed": true}, {"phase": "after_fra", "label": "FRA 2-1 ENG", "fmt": "38:45", "outcome": "O", "goal": false, "on_target": false, "pressed": false}, {"phase": "opening", "label": "FRA 2-0 MAR", "fmt": "04:34", "outcome": "B", "goal": false, "on_target": false, "pressed": true}, {"phase": "opening", "label": "FRA 2-0 MAR", "fmt": "04:35", "outcome": "B", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_fra", "label": "FRA 2-0 MAR", "fmt": "35:09", "outcome": "C", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_fra", "label": "FRA 2-0 MAR", "fmt": "78:45", "outcome": "B", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_opp", "label": "FRA 3-3 ARG (AET)", "fmt": "70:07", "outcome": "O", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_opp", "label": "FRA 3-3 ARG (AET)", "fmt": "79:24", "outcome": "G", "goal": true, "on_target": true, "pressed": false}, {"phase": "after_fra", "label": "FRA 3-3 ARG (AET)", "fmt": "80:58", "outcome": "G", "goal": true, "on_target": true, "pressed": false}, {"phase": "after_fra", "label": "FRA 3-3 ARG (AET)", "fmt": "92:52", "outcome": "B", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_opp", "label": "FRA 3-3 ARG (AET)", "fmt": "115:37", "outcome": "B", "goal": false, "on_target": false, "pressed": true}, {"phase": "after_opp", "label": "FRA 3-3 ARG (AET)", "fmt": "117:04", "outcome": "G", "goal": true, "on_target": true, "pressed": false}], "isolation": {"opening": {"to_mb": 109, "to_mb_comp": 80, "to_mb_pct": 73, "mb_made": 54, "mb_comp": 49, "mb_comp_pct": 91}, "after_fra": {"to_mb": 189, "to_mb_comp": 128, "to_mb_pct": 68, "mb_made": 86, "mb_comp": 76, "mb_comp_pct": 88}, "after_opp": {"to_mb": 101, "to_mb_comp": 72, "to_mb_pct": 71, "mb_made": 56, "mb_comp": 43, "mb_comp_pct": 77}}, "network": {"opening": {"total_passes": 945, "players": [{"name": "Tchouam\u00e9ni", "made": 140, "received": 139, "involvement": 279, "pct": 14.8}, {"name": "Varane", "made": 114, "received": 106, "involvement": 220, "pct": 11.6}, {"name": "T.Hernandez", "made": 107, "received": 96, "involvement": 203, "pct": 10.7}, {"name": "Upamecano", "made": 99, "received": 92, "involvement": 191, "pct": 10.1}, {"name": "Kounde", "made": 83, "received": 70, "involvement": 153, "pct": 8.1}, {"name": "Rabiot", "made": 76, "received": 74, "involvement": 150, "pct": 7.9}, {"name": "Mbapp\u00e9", "made": 49, "received": 81, "involvement": 130, "pct": 6.9}, {"name": "Griezmann", "made": 57, "received": 64, "involvement": 121, "pct": 6.4}, {"name": "Dembele", "made": 53, "received": 66, "involvement": 119, "pct": 6.3}, {"name": "Konat\u00e9", "made": 41, "received": 40, "involvement": 81, "pct": 4.3}, {"name": "Camavinga", "made": 34, "received": 32, "involvement": 66, "pct": 3.5}, {"name": "Lloris", "made": 33, "received": 17, "involvement": 50, "pct": 2.6}]}, "after_fra": {"total_passes": 1409, "players": [{"name": "Tchouam\u00e9ni", "made": 162, "received": 145, "involvement": 307, "pct": 10.9}, {"name": "Upamecano", "made": 144, "received": 127, "involvement": 271, "pct": 9.6}, {"name": "Griezmann", "made": 118, "received": 128, "involvement": 246, "pct": 8.7}, {"name": "Kounde", "made": 126, "received": 107, "involvement": 233, "pct": 8.3}, {"name": "T.Hernandez", "made": 126, "received": 103, "involvement": 229, "pct": 8.1}, {"name": "Konat\u00e9", "made": 112, "received": 112, "involvement": 224, "pct": 7.9}, {"name": "Mbapp\u00e9", "made": 76, "received": 126, "involvement": 202, "pct": 7.2}, {"name": "Rabiot", "made": 102, "received": 95, "involvement": 197, "pct": 7.0}, {"name": "Varane", "made": 96, "received": 87, "involvement": 183, "pct": 6.5}, {"name": "Dembele", "made": 66, "received": 81, "involvement": 147, "pct": 5.2}, {"name": "Fofana", "made": 64, "received": 59, "involvement": 123, "pct": 4.4}, {"name": "Pavard", "made": 61, "received": 54, "involvement": 115, "pct": 4.1}]}, "after_opp": {"total_passes": 742, "players": [{"name": "Tchouam\u00e9ni", "made": 119, "received": 109, "involvement": 228, "pct": 15.4}, {"name": "Upamecano", "made": 71, "received": 66, "involvement": 137, "pct": 9.2}, {"name": "Griezmann", "made": 61, "received": 70, "involvement": 131, "pct": 8.8}, {"name": "Rabiot", "made": 61, "received": 66, "involvement": 127, "pct": 8.6}, {"name": "Mbapp\u00e9", "made": 43, "received": 73, "involvement": 116, "pct": 7.8}, {"name": "T.Hernandez", "made": 55, "received": 49, "involvement": 104, "pct": 7.0}, {"name": "Konat\u00e9", "made": 55, "received": 48, "involvement": 103, "pct": 6.9}, {"name": "Kounde", "made": 50, "received": 36, "involvement": 86, "pct": 5.8}, {"name": "Varane", "made": 41, "received": 38, "involvement": 79, "pct": 5.3}, {"name": "Camavinga", "made": 37, "received": 33, "involvement": 70, "pct": 4.7}, {"name": "Saliba", "made": 38, "received": 29, "involvement": 67, "pct": 4.5}, {"name": "Dembele", "made": 23, "received": 34, "involvement": 57, "pct": 3.8}]}}, "tchouameni": {"opening": [{"name": "T.Hernandez", "total": 17, "comp": 17, "pct": 100}, {"name": "Kounde", "total": 17, "comp": 16, "pct": 94}, {"name": "Varane", "total": 15, "comp": 15, "pct": 100}, {"name": "Rabiot", "total": 13, "comp": 13, "pct": 100}, {"name": "Upamecano", "total": 13, "comp": 13, "pct": 100}, {"name": "Griezmann", "total": 12, "comp": 12, "pct": 100}, {"name": "Dembele", "total": 9, "comp": 6, "pct": 67}], "after_fra": [{"name": "Griezmann", "total": 22, "comp": 20, "pct": 91}, {"name": "Kounde", "total": 21, "comp": 21, "pct": 100}, {"name": "Rabiot", "total": 19, "comp": 19, "pct": 100}, {"name": "Dembele", "total": 17, "comp": 13, "pct": 76}, {"name": "T.Hernandez", "total": 15, "comp": 14, "pct": 93}, {"name": "Konat\u00e9", "total": 14, "comp": 14, "pct": 100}, {"name": "Upamecano", "total": 11, "comp": 11, "pct": 100}], "after_opp": [{"name": "Upamecano", "total": 17, "comp": 17, "pct": 100}, {"name": "Mbapp\u00e9", "total": 15, "comp": 11, "pct": 73}, {"name": "Griezmann", "total": 15, "comp": 12, "pct": 80}, {"name": "Rabiot", "total": 15, "comp": 13, "pct": 87}, {"name": "Konat\u00e9", "total": 12, "comp": 12, "pct": 100}, {"name": "T.Hernandez", "total": 10, "comp": 9, "pct": 90}, {"name": "Kounde", "total": 8, "comp": 7, "pct": 88}]}};
+
+function showTab(n){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+n).classList.add('active');
+  event.target.classList.add('active');
+}
+
+const TC = {
+  plugins:{legend:{display:false},tooltip:{backgroundColor:'#1a1a1a',titleColor:'#f0f0f0',bodyColor:'#999',borderColor:'#333',borderWidth:1}},
+  scales:{x:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#666'}},y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#666'}}}
+};
+
+// ── KPIs ──
+const tsWS = D.total_with_shots/Math.max(D.total_with_seqs,1);
+const tsWO = D.total_wo_shots/Math.max(D.total_wo_seqs,1);
+const tgWS = D.total_with_goals/Math.max(D.total_with_seqs,1);
+const tgWO = D.total_wo_goals/Math.max(D.total_wo_seqs,1);
+const tlbW = D.lb_with.reduce((a,b)=>a+b,0)/D.n_with.reduce((a,b)=>a+b,0);
+const tlbO = D.lb_without.reduce((a,b)=>a+b,0)/D.n_without.reduce((a,b)=>a+b,0);
+const shotRatio = (tsWS/Math.max(tsWO,0.001)).toFixed(1);
+const goalRatio = tgWO>0?(tgWS/tgWO).toFixed(1):'∞';
+
+document.getElementById('kpi-shots-with').textContent   = tsWS.toFixed(3);
+document.getElementById('kpi-shots-without').textContent= tsWO.toFixed(3);
+document.getElementById('kpi-shots-ratio').textContent  = shotRatio+'× more shots per seq with Mbappé';
+document.getElementById('kpi-goals-with').textContent   = tgWS.toFixed(3);
+document.getElementById('kpi-goals-ratio').textContent  = goalRatio+'× vs without Mbappé';
+document.getElementById('kpi-lb-with').textContent      = tlbW.toFixed(3);
+document.getElementById('kpi-lb-ratio').textContent     = (tlbW/Math.max(tlbO,0.001)).toFixed(1)+'× vs without';
+document.getElementById('find-shots-ratio').textContent = shotRatio;
+document.getElementById('find-goals-ratio').textContent = goalRatio;
+
+// ── Isolation ──
+['open','fra','opp'].forEach((k,i)=>{
+  const pt = ['opening','after_fra','after_opp'][i];
+  const d = D.isolation[pt];
+  document.getElementById('iso-to-'+k).textContent = d.to_mb;
+  document.getElementById('iso-to-'+k+'-pct').textContent = d.to_mb_pct+'% reached him';
+  document.getElementById('iso-mb-'+k).textContent = d.mb_made;
+  document.getElementById('iso-mb-'+k+'-pct').textContent = d.mb_comp_pct+'% completion';
+});
+
+// ── Shot quality cards ──
+[['open','opening'],['fra','after_fra'],['opp','after_opp']].forEach(([k,pt])=>{
+  const q=D.shot_quality[pt];
+  document.getElementById('sq-'+k+'-n').textContent =q.n+' shots';
+  document.getElementById('sq-'+k+'-g').textContent =q.goals+' ('+q.goal_pct+'%)';
+  document.getElementById('sq-'+k+'-ot').textContent=q.on_target+' ('+q.on_tgt_pct+'%)';
+  document.getElementById('sq-'+k+'-pr').textContent=q.pressed+' ('+q.pressed_pct+'%)';
+});
+
+// ── Shot log ──
+const OUTCOME_LABEL={'G':'Goal','S':'Saved','F':'Saved','B':'Blocked','O':'Off target','C':'Off target'};
+const OUTCOME_COL={'G':'#27ae60','S':'#3498db','F':'#3498db','B':'#f39c12','O':'#e74c3c','C':'#e74c3c'};
+const PHASE_COL={'opening':'#888','after_fra':'#27ae60','after_opp':'#e74c3c'};
+const PHASE_LBL={'opening':'Game start','after_fra':'After Fra goal','after_opp':'After opp goal'};
+const tbody=document.getElementById('shot-log-body');
+D.all_shots.forEach(s=>{
+  const tr=document.createElement('tr');
+  const oc=OUTCOME_COL[s.outcome]||'#888';
+  const pc=PHASE_COL[s.phase];
+  tr.innerHTML=`<td><strong>${s.label}</strong></td><td>${s.fmt}</td>
+    <td><span class="badge" style="background:${pc}22;color:${pc};">${PHASE_LBL[s.phase]}</span></td>
+    <td><span class="badge" style="background:${oc}22;color:${oc};">${OUTCOME_LABEL[s.outcome]||s.outcome}</span></td>
+    <td>${s.pressed?'<span class="badge b-amb">Pressed</span>':'<span class="badge b-grn">Free</span>'}</td>`;
+  tbody.appendChild(tr);
+});
+
+// ── Chart helpers ──
+const COLORS=[
+  '#3498db','#e74c3c','#27ae60','#f39c12','#9b59b6',
+  '#1abc9c','#e67e22','#e91e63','#00bcd4','#8bc34a','#ff5722','#607d8b'
+];
+
+// ── Involvement: shots ──
+new Chart(document.getElementById('chartInvShots'),{
+  type:'bar',
+  data:{labels:D.game_labels,datasets:[
+    {label:'With Mbappé', data:D.shots_with,  backgroundColor:'rgba(39,174,96,0.75)',barPercentage:.35},
+    {label:'Without',     data:D.shots_without,backgroundColor:'rgba(231,76,60,0.75)',barPercentage:.35},
+  ]},
+  options:{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{...TC.plugins,legend:{display:true,labels:{color:'#999',font:{size:10}}},
+      tooltip:{...TC.plugins.tooltip,callbacks:{label:c=>c.dataset.label+': '+c.parsed.y.toFixed(3)+' shots/seq'}}},
+    scales:{x:{...TC.scales.x,ticks:{color:'#666',font:{size:10}}},
+             y:{...TC.scales.y,title:{display:true,text:'shots per sequence',color:'#666',font:{size:10}}}}
+  }
+});
+
+// ── Involvement: pass comp ──
+new Chart(document.getElementById('chartInvComp'),{
+  type:'bar',
+  data:{labels:D.game_labels,datasets:[
+    {label:'Pass% with Mbappé',  data:D.comp_with,   backgroundColor:'rgba(39,174,96,0.75)', barPercentage:.35},
+    {label:'Pass% without',      data:D.comp_without, backgroundColor:'rgba(231,76,60,0.75)', barPercentage:.35},
+  ]},
+  options:{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{...TC.plugins,legend:{display:true,labels:{color:'#999',font:{size:10}}}},
+    scales:{x:{...TC.scales.x,ticks:{color:'#666',font:{size:10}}},
+             y:{...TC.scales.y,min:50,max:100,title:{display:true,text:'pass completion %',color:'#666',font:{size:10}}}}
+  }
+});
+
+// ── Shot outcomes by phase ──
+const phases3=['opening','after_fra','after_opp'];
+const pLabels=['Game start','After Fra goal','After Opp goal'];
+new Chart(document.getElementById('chartShotOutcomes'),{
+  type:'bar',
+  data:{labels:pLabels,datasets:[
+    {label:'Goal %',      data:phases3.map(p=>D.shot_quality[p].goal_pct),  backgroundColor:'rgba(39,174,96,0.8)'},
+    {label:'On target %', data:phases3.map(p=>D.shot_quality[p].on_tgt_pct-D.shot_quality[p].goal_pct), backgroundColor:'rgba(52,152,219,0.7)'},
+    {label:'Blocked/off', data:phases3.map(p=>100-D.shot_quality[p].on_tgt_pct), backgroundColor:'rgba(231,76,60,0.5)'},
+  ]},
+  options:{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{...TC.plugins,legend:{display:true,labels:{color:'#999',font:{size:10}}}},
+    scales:{x:{...TC.scales.x,stacked:true,ticks:{color:'#666'}},y:{...TC.scales.y,stacked:true,max:100,title:{display:true,text:'% of shots',color:'#666',font:{size:10}}}}
+  }
+});
+
+// ── Pressure vs goals ──
+new Chart(document.getElementById('chartShotPressure'),{
+  type:'bar',
+  data:{labels:pLabels,datasets:[
+    {label:'Pressed %',  data:phases3.map(p=>D.shot_quality[p].pressed_pct), backgroundColor:'rgba(243,156,18,0.75)', barPercentage:.35, yAxisID:'y'},
+    {label:'Goal %',     data:phases3.map(p=>D.shot_quality[p].goal_pct),    backgroundColor:'rgba(39,174,96,0.75)',  barPercentage:.35, yAxisID:'y'},
+  ]},
+  options:{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{...TC.plugins,legend:{display:true,labels:{color:'#999',font:{size:10}}}},
+    scales:{x:{...TC.scales.x,ticks:{color:'#666'}},
+             y:{...TC.scales.y,max:100,title:{display:true,text:'%',color:'#666',font:{size:10}}}}
+  }
+});
+
+// ── Network horizontal bars ──
+function mkNetChart(canvasId, pt){
+  const data=D.network[pt].players;
+  new Chart(document.getElementById(canvasId),{
+    type:'bar',
+    data:{
+      labels:data.map(p=>p.name),
+      datasets:[
+        {label:'Made',     data:data.map(p=>p.made),     backgroundColor:'rgba(52,152,219,0.75)'},
+        {label:'Received', data:data.map(p=>p.received), backgroundColor:'rgba(155,89,182,0.6)'},
+      ]
+    },
+    options:{...TC,indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      plugins:{...TC.plugins,legend:{display:true,labels:{color:'#999',font:{size:9}}}},
+      scales:{
+        x:{...TC.scales.x,stacked:true,ticks:{color:'#666',font:{size:9}}},
+        y:{...TC.scales.y,stacked:true,ticks:{color:'#ccc',font:{size:10}}}
+      }
+    }
+  });
+}
+mkNetChart('chartNetOpen','opening');
+mkNetChart('chartNetFra','after_fra');
+mkNetChart('chartNetOpp','after_opp');
+
+// ── Tchouaméni target charts ──
+function mkTchouChart(canvasId, pt){
+  const data=D.tchouameni[pt];
+  const cols=data.map((_,i)=>COLORS[i%COLORS.length]);
+  new Chart(document.getElementById(canvasId),{
+    type:'bar',
+    data:{
+      labels:data.map(d=>d.name),
+      datasets:[
+        {label:'Total passes', data:data.map(d=>d.total), backgroundColor:cols.map(c=>c+'BB')},
+      ]
+    },
+    options:{...TC,indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      plugins:{...TC.plugins,tooltip:{...TC.plugins.tooltip,
+        callbacks:{label:ctx=>{
+          const d=data[ctx.dataIndex];
+          return [' '+d.total+' passes',d.pct+'% completion'];
+        }}}},
+      scales:{
+        x:{...TC.scales.x,ticks:{color:'#666',font:{size:9}}},
+        y:{...TC.scales.y,ticks:{color:'#ccc',font:{size:10}}}
+      }
+    }
+  });
+}
+mkTchouChart('chartTchouOpen','opening');
+mkTchouChart('chartTchouFra','after_fra');
+mkTchouChart('chartTchouOpp','after_opp');
+
+// ── Tchouaméni → Mbappé by phase ──
+new Chart(document.getElementById('chartTchouMbappe'),{
+  type:'bar',
+  data:{
+    labels:pLabels,
+    datasets:[
+      {label:'Passes to Mbappé', data:D.tchouameni.opening.concat(D.tchouameni.after_fra).concat(D.tchouameni.after_opp)
+        .reduce((acc,cur,_,arr)=>acc,// placeholder
+        (() => {
+          const find=(pt)=>{const r=D.tchouameni[pt].find(d=>d.name==='Mbappé'); return r||{total:0,comp:0,pct:0};};
+          return [find('opening').total, find('after_fra').total, find('after_opp').total];
+        })()),
+        backgroundColor:['rgba(39,174,96,0.7)','rgba(243,156,18,0.7)','rgba(231,76,60,0.7)'],barPercentage:.45,yAxisID:'y'
+      },
+      {label:'Completion %', data:(()=>{
+          const find=(pt)=>{const r=D.tchouameni[pt].find(d=>d.name==='Mbappé'); return r||{total:0,comp:0,pct:0};};
+          return [find('opening').pct, find('after_fra').pct, find('after_opp').pct];
+        })(),
+        type:'line',borderColor:'#f0f0f0',backgroundColor:'transparent',
+        pointBackgroundColor:'#f0f0f0',borderWidth:2,pointRadius:5,
+        yAxisID:'y2',tension:0.3
+      },
+    ]
+  },
+  options:{...TC,responsive:true,maintainAspectRatio:false,
+    plugins:{...TC.plugins,legend:{display:true,labels:{color:'#999',font:{size:10}}}},
+    scales:{
+      x:{...TC.scales.x,ticks:{color:'#666'}},
+      y:{...TC.scales.y,title:{display:true,text:'Passes to Mbappé',color:'#666',font:{size:10}},position:'left'},
+      y2:{grid:{display:false},ticks:{color:'#999'},title:{display:true,text:'Completion %',color:'#999',font:{size:10}},position:'right',min:0,max:100}
+    }
+  }
+});
+</script>
+</body>
+</html>
