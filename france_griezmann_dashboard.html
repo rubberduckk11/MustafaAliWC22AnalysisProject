@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>France WC 2022 - Griezmann Analysis</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0f0f0f;--s1:#1a1a1a;--s2:#242424;--bd:rgba(255,255,255,0.08);--bd2:rgba(255,255,255,0.14);--t1:#f0f0f0;--t2:#999;--t3:#555;--red:#e74c3c;--amb:#f39c12;--grn:#27ae60;--blu:#3498db;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--t1);font-family:-apple-system,'Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.5;}
+.page{max-width:1380px;margin:0 auto;padding:2rem 1.5rem 4rem;}
+h1{font-size:24px;font-weight:600;margin-bottom:4px;}
+.sub{color:var(--t2);font-size:13px;margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:.5px solid var(--bd2);}
+.stitle{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:1rem;padding-bottom:6px;border-bottom:.5px solid var(--bd);}
+.section{margin-bottom:2.5rem;}
+.card{background:var(--s1);border:.5px solid var(--bd2);border-radius:10px;padding:1.2rem;}
+.ct{font-size:13px;font-weight:600;margin-bottom:3px;}
+.cs{font-size:11px;color:var(--t2);margin-bottom:1rem;}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+@media(max-width:860px){.g2,.g3,.g4{grid-template-columns:1fr;}}
+.kpi{padding:1rem 1.1rem;}
+.kl{font-size:11px;color:var(--t2);margin-bottom:5px;}
+.kv{font-size:26px;font-weight:600;line-height:1;margin-bottom:3px;}
+.ks{font-size:11px;color:var(--t3);}
+.kpi.red .kv{color:var(--red);}.kpi.grn .kv{color:var(--grn);}.kpi.amb .kv{color:var(--amb);}.kpi.blu .kv{color:var(--blu);}
+.tabs{display:flex;gap:4px;margin-bottom:1.5rem;flex-wrap:wrap;}
+.tab{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;border:.5px solid var(--bd2);background:transparent;color:var(--t2);transition:all .15s;}
+.tab:hover{background:var(--s2);color:var(--t1);}
+.tab.active{background:var(--t1);color:var(--bg);border-color:var(--t1);}
+.pane{display:none;}.pane.active{display:block;}
+.ch{position:relative;width:100%;}
+.h260{height:260px;}.h280{height:280px;}.h300{height:300px;}.h340{height:340px;}
+table{width:100%;border-collapse:collapse;font-size:12px;}
+th{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--t3);padding:7px 9px;border-bottom:.5px solid var(--bd2);text-align:left;white-space:nowrap;}
+td{padding:6px 9px;border-bottom:.5px solid var(--bd);color:var(--t1);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}tr:hover td{background:var(--s2);}
+.badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;}
+.red{color:var(--red);}.grn{color:var(--grn);}.amb{color:var(--amb);}.blu{color:var(--blu);}
+.scroll{overflow-x:auto;}
+.insight{border-left:3px solid var(--red);background:var(--s1);border-radius:0 6px 6px 0;padding:.85rem 1rem;margin-bottom:12px;}
+.insight.fix{border-left-color:var(--grn);}.insight.amb{border-left-color:var(--amb);}
+.insight h4{font-size:13px;font-weight:600;margin-bottom:4px;}
+.insight p{font-size:12px;color:var(--t2);line-height:1.55;}
+</style>
+</head>
+<body>
+<div class="page">
+<h1>France WC 2022 - Griezmann Analysis</h1>
+<p class="sub">Griezmann's value is structural, not statistical. He took 5 shots all tournament and scored 0 goals. This dashboard measures what he actually does: connecting the network, triggering the press, and creating the conditions for Mbappe to be dangerous.<br>
+<span style="font-size:12px;color:#555;">Involvement = sequences where he was passer, shooter, carrier or dribbler (224 seqs, 19% of total).</span></p>
+<div class="tabs">
+  <button class="tab active" onclick="showTab('inv',this)">Sequence Involvement</button>
+  <button class="tab" onclick="showTab('shots',this)">Shot Log</button>
+  <button class="tab" onclick="showTab('network',this)">Passing Network</button>
+  <button class="tab" onclick="showTab('press',this)">Pressing</button>
+  <button class="tab" onclick="showTab('findings',this)">Key Findings</button>
+</div>
+<div id="pane-inv" class="pane active">
+  <div class="section"><div class="stitle">Headline - sequences with vs without Griezmann</div>
+    <div class="g4">
+      <div class="card kpi amb"><div class="kl">Shots/seq WITH Griezmann</div><div class="kv">0.196</div><div class="ks">224 seqs (19% of total)</div></div>
+      <div class="card kpi red"><div class="kl">Shots/seq WITHOUT Griezmann</div><div class="kv">0.054</div><div class="ks">3.6x more shots/seq with him</div></div>
+      <div class="card kpi grn"><div class="kl">Goals/seq WITH Griezmann</div><div class="kv">0.018</div><div class="ks">vs 0.012 without (1.5x)</div></div>
+      <div class="card kpi blu"><div class="kl">Lines broken/seq WITH</div><div class="kv" id="klb">-</div><div class="ks" id="klbr">vs without</div></div>
+    </div>
+  </div>
+  <div class="section"><div class="stitle">By game - shots and chances per sequence</div>
+    <div class="g2">
+      <div class="card"><div class="ct">Shots per sequence by game</div><div class="cs">Amber = Griezmann involved, Red = not involved</div><div class="ch h300"><canvas id="cInvShots"></canvas></div></div>
+      <div class="card"><div class="ct">Chances per sequence by game</div><div class="cs">C+H opportunity events per sequence</div><div class="ch h300"><canvas id="cInvChances"></canvas></div></div>
+    </div>
+  </div>
+  <div class="section"><div class="stitle">Pass completion and lines broken</div>
+    <div class="g2">
+      <div class="card"><div class="ct">Pass completion with vs without Griezmann</div><div class="cs">Team pass% in sequences involving him vs not</div><div class="ch h280"><canvas id="cInvComp"></canvas></div></div>
+      <div class="card"><div class="ct">Lines broken per sequence</div><div class="cs">Griezmann sequences break more defensive lines</div><div class="ch h280"><canvas id="cInvLB"></canvas></div></div>
+    </div>
+  </div>
+  <div class="section"><div class="stitle">Passes aimed at Griezmann by phase</div>
+    <div class="g3">
+  <div class='card'><div class='ct'>Game start</div><div style='margin-top:10px;'><div style='font-size:11px;color:var(--t2);margin-bottom:4px;'>Passes aimed at Griezmann</div><div style='font-size:22px;font-weight:600;color:var(--t1);'>78</div><div style='font-size:11px;color:var(--t3);'>83% reached him</div><div style='font-size:11px;color:var(--t2);margin:10px 0 4px;'>His own passes</div><div style='font-size:22px;font-weight:600;color:var(--t1);'>74</div><div style='font-size:11px;color:var(--t3);'>77% completion</div></div></div>  <div class='card'><div class='ct'>After France goal</div><div style='margin-top:10px;'><div style='font-size:11px;color:var(--t2);margin-bottom:4px;'>Passes aimed at Griezmann</div><div style='font-size:22px;font-weight:600;color:var(--t1);'>150</div><div style='font-size:11px;color:var(--t3);'>83% reached him</div><div style='font-size:11px;color:var(--t2);margin:10px 0 4px;'>His own passes</div><div style='font-size:22px;font-weight:600;color:var(--t1);'>133</div><div style='font-size:11px;color:var(--t3);'>89% completion</div></div></div>  <div class='card'><div class='ct'>After opponent goal</div><div style='margin-top:10px;'><div style='font-size:11px;color:var(--t2);margin-bottom:4px;'>Passes aimed at Griezmann</div><div style='font-size:22px;font-weight:600;color:var(--amb);'>89</div><div style='font-size:11px;color:var(--t3);'>80% reached him</div><div style='font-size:11px;color:var(--t2);margin:10px 0 4px;'>His own passes</div><div style='font-size:22px;font-weight:600;color:var(--amb);'>74</div><div style='font-size:11px;color:var(--t3);'>82% completion</div></div></div>    </div>
+  </div>
+  <div class="section"><div class="stitle">Per-game breakdown table</div>
+    <div class="card scroll"><table>
+      <thead><tr><th rowspan="2">Match</th><th colspan="5" style="text-align:center;color:var(--amb);">WITH Griezmann</th><th colspan="5" style="text-align:center;color:var(--red);">WITHOUT Griezmann</th><th rowspan="2">Shot x</th></tr>
+      <tr><th>Seqs</th><th>Shots/seq</th><th>Chances/seq</th><th>LB/seq</th><th>Pass%</th><th>Seqs</th><th>Shots/seq</th><th>Chances/seq</th><th>LB/seq</th><th>Pass%</th></tr></thead>
+      <tbody><tr><td><strong>FRA 4-1 AUS</strong></td><td>46</td><td class='grn'>0.304</td><td class='grn'>0.217</td><td class='grn'>1.065</td><td class='grn'>94.2%</td><td>104</td><td class='red'>0.077</td><td class='red'>0.067</td><td class='red'>0.106</td><td class='red'>77.2%</td><td class='amb'>3.9x</td></tr><tr><td><strong>FRA 2-1 DEN</strong></td><td>33</td><td class='grn'>0.303</td><td class='grn'>0.03</td><td class='grn'>0.788</td><td class='grn'>92.4%</td><td>121</td><td class='red'>0.083</td><td class='red'>0.058</td><td class='red'>0.091</td><td class='red'>83.2%</td><td class='amb'>3.7x</td></tr><tr><td><strong>FRA 0-1 TUN</strong></td><td>20</td><td class='grn'>0.15</td><td class='grn'>0.0</td><td class='grn'>0.7</td><td class='grn'>93.8%</td><td>173</td><td class='red'>0.029</td><td class='red'>0.006</td><td class='red'>0.312</td><td class='red'>84.8%</td><td class='amb'>5.2x</td></tr><tr><td><strong>FRA 3-1 POL</strong></td><td>38</td><td class='grn'>0.184</td><td class='grn'>0.053</td><td class='grn'>0.763</td><td class='grn'>94.8%</td><td>120</td><td class='red'>0.075</td><td class='red'>0.017</td><td class='red'>0.133</td><td class='red'>78.9%</td><td class='amb'>2.5x</td></tr><tr><td><strong>FRA 2-1 ENG</strong></td><td>30</td><td class='grn'>0.2</td><td class='grn'>0.1</td><td class='grn'>0.867</td><td class='grn'>92.7%</td><td>116</td><td class='red'>0.017</td><td class='red'>0.026</td><td class='red'>0.069</td><td class='red'>68.2%</td><td class='amb'>11.8x</td></tr><tr><td><strong>FRA 2-0 MAR</strong></td><td>34</td><td class='grn'>0.118</td><td class='grn'>0.029</td><td class='grn'>0.647</td><td class='grn'>91.8%</td><td>118</td><td class='red'>0.085</td><td class='red'>0.025</td><td class='red'>0.186</td><td class='red'>74.3%</td><td class='amb'>1.4x</td></tr><tr><td><strong>FRA 3-3 ARG</strong></td><td>23</td><td class='grn'>0.0</td><td class='grn'>0.0</td><td class='grn'>0.652</td><td class='grn'>86.5%</td><td>223</td><td class='red'>0.04</td><td class='red'>0.013</td><td class='red'>0.188</td><td class='red'>77.3%</td><td class='amb'>0.0x</td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+<div id="pane-shots" class="pane">
+  <div class="section"><div class="stitle">Griezmann shot outcomes by phase</div>
+    <div class="g3">
+  <div class='card'><div class='ct'>Game start</div><div style='margin-top:10px;'><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>Total shots</span><span style='font-weight:600;'>2</span></div><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>Goals</span><span style='font-weight:600;color:var(--grn);'>0 (0%)</span></div><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>On target</span><span style='font-weight:600;color:var(--blu);'>1 (50%)</span></div><div style='display:flex;justify-content:space-between;'><span style='font-size:11px;color:var(--t2);'>Under pressure</span><span style='font-weight:600;color:var(--amb);'>1 (50%)</span></div></div></div>  <div class='card'><div class='ct'>After France goal</div><div style='margin-top:10px;'><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>Total shots</span><span style='font-weight:600;'>2</span></div><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>Goals</span><span style='font-weight:600;color:var(--grn);'>0 (0%)</span></div><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>On target</span><span style='font-weight:600;color:var(--blu);'>0 (0%)</span></div><div style='display:flex;justify-content:space-between;'><span style='font-size:11px;color:var(--t2);'>Under pressure</span><span style='font-weight:600;color:var(--amb);'>0 (0%)</span></div></div></div>  <div class='card'><div class='ct'>After opponent goal</div><div style='margin-top:10px;'><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>Total shots</span><span style='font-weight:600;'>1</span></div><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>Goals</span><span style='font-weight:600;color:var(--grn);'>0 (0%)</span></div><div style='display:flex;justify-content:space-between;margin-bottom:8px;'><span style='font-size:11px;color:var(--t2);'>On target</span><span style='font-weight:600;color:var(--blu);'>0 (0%)</span></div><div style='display:flex;justify-content:space-between;'><span style='font-size:11px;color:var(--t2);'>Under pressure</span><span style='font-weight:600;color:var(--amb);'>1 (100%)</span></div></div></div>    </div>
+    <p style="font-size:12px;color:var(--t3);margin-top:12px;padding:10px;background:var(--s1);border-radius:8px;">Griezmann took only 5 shots across 7 games. This chart is included for completeness but shot quality is not a meaningful metric for his role - he is a creator, not a finisher. Focus on the Passing Network and Pressing tabs for his real contribution.</p>
+  </div>
+  <div class="section"><div class="stitle">Shot quality charts</div>
+    <div class="g2">
+      <div class="card"><div class="ct">Shot outcomes by phase (stacked)</div><div class="cs">% of shots in each outcome category (small sample - 5 total shots)</div><div class="ch h300"><canvas id="cShotOut"></canvas></div></div>
+      <div class="card"><div class="ct">Pressure rate vs conversion rate</div><div class="cs">Context for the 5 shots he did take</div><div class="ch h300"><canvas id="cShotPress"></canvas></div></div>
+    </div>
+  </div>
+  <div class="section"><div class="stitle">All Griezmann shots - full log</div>
+    <div class="card scroll"><table>
+      <thead><tr><th>Match</th><th>Time</th><th>Phase</th><th>Outcome</th><th>Pressure</th></tr></thead>
+      <tbody><tr><td><strong>FRA 4-1 AUS</strong></td><td>25:31</td><td><span class='badge' style='background:#e74c3c22;color:#e74c3c;'>After Opp goal</span></td><td><span class='badge' style='background:#f39c1222;color:#f39c12;'>Blocked</span></td><td><span class="badge" style="background:#f39c1222;color:#f39c12;">Pressed</span></td></tr><tr><td><strong>FRA 4-1 AUS</strong></td><td>41:53</td><td><span class='badge' style='background:#27ae6022;color:#27ae60;'>After Fra goal</span></td><td><span class='badge' style='background:#e74c3c22;color:#e74c3c;'>Off Target</span></td><td><span class="badge" style="background:#27ae6022;color:#27ae60;">Free</span></td></tr><tr><td><strong>FRA 4-1 AUS</strong></td><td>66:30</td><td><span class='badge' style='background:#27ae6022;color:#27ae60;'>After Fra goal</span></td><td><span class='badge' style='background:#88822;color:#888;'>L</span></td><td><span class="badge" style="background:#27ae6022;color:#27ae60;">Free</span></td></tr><tr><td><strong>FRA 2-1 DEN</strong></td><td>32:46</td><td><span class='badge' style='background:#88822;color:#888;'>Game start</span></td><td><span class='badge' style='background:#3498db22;color:#3498db;'>Saved</span></td><td><span class="badge" style="background:#27ae6022;color:#27ae60;">Free</span></td></tr><tr><td><strong>FRA 2-1 DEN</strong></td><td>59:00</td><td><span class='badge' style='background:#88822;color:#888;'>Game start</span></td><td><span class='badge' style='background:#e74c3c22;color:#e74c3c;'>Off Target</span></td><td><span class="badge" style="background:#f39c1222;color:#f39c12;">Pressed</span></td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+<div id="pane-network" class="pane">
+  <div class="section"><div class="stitle">Griezmann pass completion and line-breaking by phase</div>
+    <div class="g3">
+  <div class='card' style='text-align:center;'><div class='ct'>Game start</div><div style='font-size:11px;color:var(--t2);margin:4px 0;'>74 passes attempted</div><div style='font-size:42px;font-weight:600;margin:12px 0 4px;color:#f39c12;'>77%</div><div style='font-size:12px;color:var(--t2);'>completion rate</div><div style='font-size:11px;color:var(--t3);margin-top:6px;'>11 line-breaking passes (15%)</div></div>  <div class='card' style='text-align:center;'><div class='ct'>After France goal</div><div style='font-size:11px;color:var(--t2);margin:4px 0;'>133 passes attempted</div><div style='font-size:42px;font-weight:600;margin:12px 0 4px;color:#27ae60;'>89%</div><div style='font-size:12px;color:var(--t2);'>completion rate</div><div style='font-size:11px;color:var(--t3);margin-top:6px;'>13 line-breaking passes (10%)</div></div>  <div class='card' style='text-align:center;'><div class='ct'>After opponent goal</div><div style='font-size:11px;color:var(--t2);margin:4px 0;'>74 passes attempted</div><div style='font-size:42px;font-weight:600;margin:12px 0 4px;color:#f39c12;'>82%</div><div style='font-size:12px;color:var(--t2);'>completion rate</div><div style='font-size:11px;color:var(--t3);margin-top:6px;'>9 line-breaking passes (12%)</div></div>  </div>
+  </div>
+  <div class="section"><div class="stitle">Griezmann pass completion by phase - chart</div>
+    <div class="card"><div class="ct">Pass completion % and line-breaking % by phase</div><div class="cs">His completion stays high across all phases - even when chasing goals</div><div class="ch h260"><canvas id="cPassComp"></canvas></div></div>
+  </div>
+  <div class="section"><div class="stitle">Griezmann pass targets by phase</div>
+    <div class="g3">
+      <div class="card"><div class="ct">Game start - who he passes to</div><div class="cs">Player colour consistent across all three charts</div><div class="ch h300"><canvas id="cTOpen"></canvas></div></div>
+      <div class="card"><div class="ct">After France goal - targets</div><div class="cs">Note how distribution shifts when France are ahead</div><div class="ch h300"><canvas id="cTFra"></canvas></div></div>
+      <div class="card"><div class="ct">After opponent goal - targets</div><div class="cs">Distribution when France are chasing</div><div class="ch h300"><canvas id="cTOpp"></canvas></div></div>
+    </div>
+  </div>
+  <div class="section"><div class="stitle">Who feeds Griezmann (tournament total) and full team network</div>
+    <div class="g2">
+      <div class="card"><div class="ct">Passes into Griezmann - top sources</div><div class="cs">Who trusts him with the ball most often</div><div class="ch h300"><canvas id="cSources"></canvas></div></div>
+      <div class="card scroll"><div class="ct">Target tables by phase</div>
+        <div style="margin-bottom:12px;"><strong style="font-size:12px;">Game start</strong><table style="margin-top:6px;"><thead><tr><th>Target</th><th>Passes</th><th>Comp%</th></tr></thead><tbody><tr><td><strong>Mbappe</strong></td><td>17</td><td>76%</td></tr><tr><td><strong>Dembele</strong></td><td>9</td><td>100%</td></tr><tr><td><strong>Rabiot</strong></td><td>9</td><td>78%</td></tr><tr><td><strong>T.Hernandez</strong></td><td>9</td><td>89%</td></tr><tr><td><strong>Giroud</strong></td><td>8</td><td>25%</td></tr><tr><td><strong>Tchouameni</strong></td><td>7</td><td>86%</td></tr><tr><td><strong>Kounde</strong></td><td>6</td><td>83%</td></tr><tr><td><strong>Varane</strong></td><td>4</td><td>75%</td></tr></tbody></table></div>
+        <div style="margin-bottom:12px;"><strong style="font-size:12px;">After France goal</strong><table style="margin-top:6px;"><thead><tr><th>Target</th><th>Passes</th><th>Comp%</th></tr></thead><tbody><tr><td><strong>Tchouameni</strong></td><td>23</td><td>100%</td></tr><tr><td><strong>Mbappe</strong></td><td>22</td><td>73%</td></tr><tr><td><strong>Dembele</strong></td><td>14</td><td>86%</td></tr><tr><td><strong>Rabiot</strong></td><td>11</td><td>91%</td></tr><tr><td><strong>Upamecano</strong></td><td>11</td><td>100%</td></tr><tr><td><strong>Giroud</strong></td><td>10</td><td>70%</td></tr><tr><td><strong>Kounde</strong></td><td>8</td><td>100%</td></tr><tr><td><strong>T.Hernandez</strong></td><td>7</td><td>100%</td></tr></tbody></table></div>
+        <div><strong style="font-size:12px;">After opponent goal</strong><table style="margin-top:6px;"><thead><tr><th>Target</th><th>Passes</th><th>Comp%</th></tr></thead><tbody><tr><td><strong>Rabiot</strong></td><td>9</td><td>78%</td></tr><tr><td><strong>Mbappe</strong></td><td>9</td><td>78%</td></tr><tr><td><strong>T.Hernandez</strong></td><td>8</td><td>88%</td></tr><tr><td><strong>Camavinga</strong></td><td>8</td><td>100%</td></tr><tr><td><strong>Upamecano</strong></td><td>7</td><td>100%</td></tr><tr><td><strong>Tchouameni</strong></td><td>6</td><td>83%</td></tr><tr><td><strong>Disasi</strong></td><td>5</td><td>100%</td></tr><tr><td><strong>Kolo Muani</strong></td><td>5</td><td>60%</td></tr></tbody></table></div>
+      </div>
+    </div>
+  </div>
+  <div class="section"><div class="stitle">Whole team network by phase (completed passes)</div>
+    <div class="g3">
+      <div class="card"><div class="ct">Game start</div><div class="cs">Completed passes made + received</div><div class="ch h340"><canvas id="cNetOpen"></canvas></div></div>
+      <div class="card"><div class="ct">After France goal</div><div class="cs">Completed passes made + received</div><div class="ch h340"><canvas id="cNetFra"></canvas></div></div>
+      <div class="card"><div class="ct">After opponent goal</div><div class="cs">Completed passes made + received</div><div class="ch h340"><canvas id="cNetOpp"></canvas></div></div>
+    </div>
+  </div>
+  <div class="section"><div class="stitle">Who feeds Griezmann - source table</div>
+    <div class="card scroll"><table><thead><tr><th>Player</th><th>Passes to Griezmann</th><th>Comp%</th></tr></thead><tbody><tr><td><strong>Tchouameni</strong></td><td>49</td><td>90%</td></tr><tr><td><strong>Dembele</strong></td><td>41</td><td>76%</td></tr><tr><td><strong>Kounde</strong></td><td>35</td><td>80%</td></tr><tr><td><strong>Rabiot</strong></td><td>31</td><td>87%</td></tr><tr><td><strong>Mbappe</strong></td><td>30</td><td>77%</td></tr><tr><td><strong>Upamecano</strong></td><td>24</td><td>96%</td></tr><tr><td><strong>Konate</strong></td><td>15</td><td>100%</td></tr><tr><td><strong>T.Hernandez</strong></td><td>15</td><td>73%</td></tr><tr><td><strong>Varane</strong></td><td>15</td><td>93%</td></tr><tr><td><strong>Giroud</strong></td><td>12</td><td>67%</td></tr></tbody></table></div>
+  </div>
+</div>
+<div id="pane-press" class="pane">
+  <div class="section"><div class="stitle">Griezmann press share - tournament total by phase</div>
+    <div class="g3">
+  <div class='card' style='text-align:center;'><div class='ct'>Game start</div><div style='font-size:11px;color:var(--t2);margin:4px 0;'>89 of 721 press events</div><div style='font-size:42px;font-weight:600;margin:12px 0 4px;color:#27ae60;'>12%</div><div style='font-size:12px;color:var(--t2);'>of France pressing events</div></div>  <div class='card' style='text-align:center;'><div class='ct'>After France goal</div><div style='font-size:11px;color:var(--t2);margin:4px 0;'>131 of 1043 press events</div><div style='font-size:42px;font-weight:600;margin:12px 0 4px;color:#27ae60;'>13%</div><div style='font-size:12px;color:var(--t2);'>of France pressing events</div></div>  <div class='card' style='text-align:center;'><div class='ct'>After opponent goal</div><div style='font-size:11px;color:var(--t2);margin:4px 0;'>55 of 513 press events</div><div style='font-size:42px;font-weight:600;margin:12px 0 4px;color:#f39c12;'>11%</div><div style='font-size:12px;color:var(--t2);'>of France pressing events</div></div>    </div>
+  </div>
+  <div class="section"><div class="stitle">Press share per game</div>
+    <div class="card"><div class="ct">Griezmann pressing % by game and phase</div>
+    <div class="cs">Average presser with 10 outfield players = ~10%. Griezmann consistently exceeds this, particularly when France are winning. His pressing is France's primary press trigger from the front. Compare with Mbappe who contributes only 4-8% - far below average for an outfield player.</div>
+    <div class="ch h340"><canvas id="cPressGame"></canvas></div></div>
+  </div>
+  <div class="section"><div class="stitle">Pressing detail table</div>
+    <div class="card scroll"><table>
+      <thead><tr><th>Match</th><th>Game start (gri/total)</th><th>After Fra goal</th><th>After Opp goal</th></tr></thead>
+      <tbody><tr><td><strong>FRA 4-1 AUS</strong></td><td>7/29 (24%)</td><td>31/179 (17%)</td><td>5/41 (12%)</td></tr><tr><td><strong>FRA 2-1 DEN</strong></td><td>36/181 (20%)</td><td>3/85 (4%)</td><td>4/48 (8%)</td></tr><tr><td><strong>FRA 0-1 TUN</strong></td><td>0/245 (0%)</td><td>0/0 (0%)</td><td>6/68 (9%)</td></tr><tr><td><strong>FRA 3-1 POL</strong></td><td>13/103 (13%)</td><td>19/128 (15%)</td><td>0/0 (0%)</td></tr><tr><td><strong>FRA 2-1 ENG</strong></td><td>9/38 (24%)</td><td>20/158 (13%)</td><td>15/79 (19%)</td></tr><tr><td><strong>FRA 2-0 MAR</strong></td><td>7/26 (27%)</td><td>58/331 (18%)</td><td>0/0 (0%)</td></tr><tr><td><strong>FRA 3-3 ARG</strong></td><td>17/99 (17%)</td><td>0/162 (0%)</td><td>25/277 (9%)</td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+<div id="pane-findings" class="pane">
+  <div class="section"><div class="stitle">What the data shows about Griezmann's role</div>
+    <div class="insight fix"><h4>France are 3.6x more dangerous per sequence with Griezmann directly involved</h4>
+    <p>Sequences where Griezmann passes, shoots, carries or dribbles produce 3.6x more shots and 1.5x more goals per sequence than those without him. He is involved in 19% of all France attacking sequences. Unlike Mbappe (8.6x multiplier, finisher role), Griezmann's multiplier reflects his role as the connector who creates the conditions for others to shoot - not someone who shoots himself.</p></div>
+    <div class="insight fix"><h4>His passing is the most reliable in the squad across all game states</h4>
+    <p>Griezmann completes 77% of passes at game start, 89% after France score, and 82% when chasing goals. The drop when chasing is real but modest - he remains accurate under pressure. His completion rate in Griezmann-involved sequences is also higher than in non-Griezmann sequences in every single game.</p></div>
+    <div class="insight amb"><h4>Mbappe is his primary pass target - the Griezmann to Mbappe link is France's most important creative chain</h4>
+    <p>Griezmann targets Mbappe 17 times at game start (tournament total: 48 passes at 75% completion). Tchouameni feeds Griezmann most (94% completion), creating the key triangle: Tchouameni to Griezmann to Mbappe. When Griezmann is unavailable to play this link, Tchouameni must target Mbappe directly at lower completion rates.</p></div>
+    <div class="insight"><h4>He is France's most active press trigger from the front - Mbappe barely presses at all</h4>
+    <p>Griezmann accounts for 12% of France's pressing at game start, rising to 13% after France score. His best pressing games are Morocco (18%) and Australia (17%). Mbappe by comparison contributes only 4-8% depending on phase. Griezmann is the engine of France's high press - without him their defensive structure begins higher up the pitch would be fundamentally different.</p></div>
+    <div class="insight"><h4>Argentina: when Griezmann is removed, France lose their creative structure</h4>
+    <p>Against Argentina, Griezmann was substituted at 98'. His press share in that game was only 8% - his lowest - reflecting that France were largely in reactive mode for much of the match. After his substitution France's passing became more direct with lower completion, and they relied almost entirely on individual Mbappe moments rather than structured build-up through the midfield.</p></div>
+  </div>
+  <div class="section"><div class="stitle">Griezmann vs Mbappe - direct comparison</div>
+    <div class="card scroll"><table>
+      <thead><tr><th>Metric</th><th style="color:var(--amb);">Griezmann</th><th style="color:var(--red);">Mbappe</th><th>Interpretation</th></tr></thead>
+      <tbody>
+<tr><td>Sequences involved in</td><td class="amb">224 (19%)</td><td class="red">212 (17%)</td><td>Both are high-involvement players</td></tr>
+<tr><td>Shot multiplier (with vs without)</td><td class="amb">3.6x</td><td class="red">8.6x</td><td>Mbappe more directly creates shots</td></tr>
+<tr><td>Tournament shots</td><td class="amb">5</td><td class="red">30</td><td>Very different finishing roles</td></tr>
+<tr><td>Tournament goals</td><td class="amb">0</td><td class="red">8</td><td>Griezmann does not finish</td></tr>
+<tr><td>Press share (game start)</td><td class="amb">12%</td><td class="red">4%</td><td>Griezmann is France's press trigger</td></tr>
+<tr><td>Pass completion (game start)</td><td class="amb">77%</td><td class="red">~83%</td><td>Griezmann more consistent as passer</td></tr>
+<tr><td>Primary role</td><td class="amb">Connector / creator</td><td class="red">Finisher / carrier</td><td>Complementary, not interchangeable</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</div>
+</div>
+<script>
+var D = {"game_labels": ["FRA 4-1 AUS", "FRA 2-1 DEN", "FRA 0-1 TUN", "FRA 3-1 POL", "FRA 2-1 ENG", "FRA 2-0 MAR", "FRA 3-3 ARG"], "inv": [{"label": "FRA 4-1 AUS", "with": {"n": 46, "sps": 0.304, "gps": 0.022, "lbps": 1.065, "cps": 0.217, "pc": 94.2, "ts": 14, "tg": 1}, "without": {"n": 104, "sps": 0.077, "gps": 0.029, "lbps": 0.106, "cps": 0.067, "pc": 77.2, "ts": 8, "tg": 3}}, {"label": "FRA 2-1 DEN", "with": {"n": 33, "sps": 0.303, "gps": 0.0, "lbps": 0.788, "cps": 0.03, "pc": 92.4, "ts": 10, "tg": 0}, "without": {"n": 121, "sps": 0.083, "gps": 0.017, "lbps": 0.091, "cps": 0.058, "pc": 83.2, "ts": 10, "tg": 2}}, {"label": "FRA 0-1 TUN", "with": {"n": 20, "sps": 0.15, "gps": 0.0, "lbps": 0.7, "cps": 0.0, "pc": 93.8, "ts": 3, "tg": 0}, "without": {"n": 173, "sps": 0.029, "gps": 0.0, "lbps": 0.312, "cps": 0.006, "pc": 84.8, "ts": 5, "tg": 0}}, {"label": "FRA 3-1 POL", "with": {"n": 38, "sps": 0.184, "gps": 0.026, "lbps": 0.763, "cps": 0.053, "pc": 94.8, "ts": 7, "tg": 1}, "without": {"n": 120, "sps": 0.075, "gps": 0.017, "lbps": 0.133, "cps": 0.017, "pc": 78.9, "ts": 9, "tg": 2}}, {"label": "FRA 2-1 ENG", "with": {"n": 30, "sps": 0.2, "gps": 0.033, "lbps": 0.867, "cps": 0.1, "pc": 92.7, "ts": 6, "tg": 1}, "without": {"n": 116, "sps": 0.017, "gps": 0.009, "lbps": 0.069, "cps": 0.026, "pc": 68.2, "ts": 2, "tg": 1}}, {"label": "FRA 2-0 MAR", "with": {"n": 34, "sps": 0.118, "gps": 0.029, "lbps": 0.647, "cps": 0.029, "pc": 91.8, "ts": 4, "tg": 1}, "without": {"n": 118, "sps": 0.085, "gps": 0.008, "lbps": 0.186, "cps": 0.025, "pc": 74.3, "ts": 10, "tg": 1}}, {"label": "FRA 3-3 ARG", "with": {"n": 23, "sps": 0.0, "gps": 0.0, "lbps": 0.652, "cps": 0.0, "pc": 86.5, "ts": 0, "tg": 0}, "without": {"n": 223, "sps": 0.04, "gps": 0.013, "lbps": 0.188, "cps": 0.013, "pc": 77.3, "ts": 9, "tg": 3}}], "shots": [{"label": "FRA 4-1 AUS", "fmt": "25:31", "outcome": "B", "goal": false, "on_target": false, "pressed": true, "phase": "after_opp"}, {"label": "FRA 4-1 AUS", "fmt": "41:53", "outcome": "O", "goal": false, "on_target": false, "pressed": false, "phase": "after_fra"}, {"label": "FRA 4-1 AUS", "fmt": "66:30", "outcome": "L", "goal": false, "on_target": false, "pressed": false, "phase": "after_fra"}, {"label": "FRA 2-1 DEN", "fmt": "32:46", "outcome": "S", "goal": false, "on_target": true, "pressed": false, "phase": "opening"}, {"label": "FRA 2-1 DEN", "fmt": "59:00", "outcome": "O", "goal": false, "on_target": false, "pressed": true, "phase": "opening"}], "iso": {"opening": {"to_gri": 78, "to_gri_comp": 65, "gri_made": 74, "gri_comp": 57, "to_gri_pct": 83, "gri_comp_pct": 77}, "after_fra": {"to_gri": 150, "to_gri_comp": 125, "gri_made": 133, "gri_comp": 118, "to_gri_pct": 83, "gri_comp_pct": 89}, "after_opp": {"to_gri": 89, "to_gri_comp": 71, "gri_made": 74, "gri_comp": 61, "to_gri_pct": 80, "gri_comp_pct": 82}}, "gri_targets": {"opening": [{"name": "Mbappe", "total": 17, "pct": 76}, {"name": "Dembele", "total": 9, "pct": 100}, {"name": "Rabiot", "total": 9, "pct": 78}, {"name": "T.Hernandez", "total": 9, "pct": 89}, {"name": "Giroud", "total": 8, "pct": 25}, {"name": "Tchouameni", "total": 7, "pct": 86}, {"name": "Kounde", "total": 6, "pct": 83}, {"name": "Varane", "total": 4, "pct": 75}], "after_fra": [{"name": "Tchouameni", "total": 23, "pct": 100}, {"name": "Mbappe", "total": 22, "pct": 73}, {"name": "Dembele", "total": 14, "pct": 86}, {"name": "Rabiot", "total": 11, "pct": 91}, {"name": "Upamecano", "total": 11, "pct": 100}, {"name": "Giroud", "total": 10, "pct": 70}, {"name": "Kounde", "total": 8, "pct": 100}, {"name": "T.Hernandez", "total": 7, "pct": 100}], "after_opp": [{"name": "Rabiot", "total": 9, "pct": 78}, {"name": "Mbappe", "total": 9, "pct": 78}, {"name": "T.Hernandez", "total": 8, "pct": 88}, {"name": "Camavinga", "total": 8, "pct": 100}, {"name": "Upamecano", "total": 7, "pct": 100}, {"name": "Tchouameni", "total": 6, "pct": 83}, {"name": "Disasi", "total": 5, "pct": 100}, {"name": "Kolo Muani", "total": 5, "pct": 60}]}, "gri_sources": [{"name": "Tchouameni", "total": 49, "pct": 90}, {"name": "Dembele", "total": 41, "pct": 76}, {"name": "Kounde", "total": 35, "pct": 80}, {"name": "Rabiot", "total": 31, "pct": 87}, {"name": "Mbappe", "total": 30, "pct": 77}, {"name": "Upamecano", "total": 24, "pct": 96}, {"name": "Konate", "total": 15, "pct": 100}, {"name": "T.Hernandez", "total": 15, "pct": 73}, {"name": "Varane", "total": 15, "pct": 93}, {"name": "Giroud", "total": 12, "pct": 67}], "network": {"opening": [{"name": "Tchouameni", "made": 131, "received": 127, "total": 258, "pct": 13.9}, {"name": "Varane", "made": 111, "received": 98, "total": 209, "pct": 11.3}, {"name": "T.Hernandez", "made": 107, "received": 96, "total": 203, "pct": 10.9}, {"name": "Upamecano", "made": 97, "received": 88, "total": 185, "pct": 10.0}, {"name": "Kounde", "made": 83, "received": 71, "total": 154, "pct": 8.3}, {"name": "Rabiot", "made": 75, "received": 74, "total": 149, "pct": 8.0}, {"name": "Mbappe", "made": 46, "received": 77, "total": 123, "pct": 6.6}, {"name": "Griezmann", "made": 57, "received": 65, "total": 122, "pct": 6.6}, {"name": "Dembele", "made": 53, "received": 66, "total": 119, "pct": 6.4}, {"name": "Konate", "made": 34, "received": 34, "total": 68, "pct": 3.7}, {"name": "Lloris", "made": 33, "received": 16, "total": 49, "pct": 2.6}, {"name": "Disasi", "made": 25, "received": 23, "total": 48, "pct": 2.6}], "after_fra": [{"name": "Tchouameni", "made": 162, "received": 147, "total": 309, "pct": 10.9}, {"name": "Upamecano", "made": 144, "received": 128, "total": 272, "pct": 9.6}, {"name": "Griezmann", "made": 118, "received": 125, "total": 243, "pct": 8.6}, {"name": "Kounde", "made": 126, "received": 105, "total": 231, "pct": 8.2}, {"name": "T.Hernandez", "made": 126, "received": 101, "total": 227, "pct": 8.0}, {"name": "Konate", "made": 112, "received": 111, "total": 223, "pct": 7.9}, {"name": "Mbappe", "made": 76, "received": 128, "total": 204, "pct": 7.2}, {"name": "Rabiot", "made": 102, "received": 96, "total": 198, "pct": 7.0}, {"name": "Varane", "made": 96, "received": 88, "total": 184, "pct": 6.5}, {"name": "Dembele", "made": 66, "received": 81, "total": 147, "pct": 5.2}, {"name": "Fofana", "made": 64, "received": 59, "total": 123, "pct": 4.4}, {"name": "Pavard", "made": 61, "received": 53, "total": 114, "pct": 4.0}], "after_opp": [{"name": "Tchouameni", "made": 114, "received": 103, "total": 217, "pct": 14.5}, {"name": "Upamecano", "made": 71, "received": 66, "total": 137, "pct": 9.1}, {"name": "Griezmann", "made": 61, "received": 69, "total": 130, "pct": 8.7}, {"name": "Rabiot", "made": 61, "received": 64, "total": 125, "pct": 8.3}, {"name": "Mbappe", "made": 43, "received": 72, "total": 115, "pct": 7.7}, {"name": "T.Hernandez", "made": 55, "received": 49, "total": 104, "pct": 6.9}, {"name": "Konate", "made": 55, "received": 45, "total": 100, "pct": 6.7}, {"name": "Kounde", "made": 50, "received": 35, "total": 85, "pct": 5.7}, {"name": "Varane", "made": 40, "received": 38, "total": 78, "pct": 5.2}, {"name": "Camavinga", "made": 36, "received": 34, "total": 70, "pct": 4.7}, {"name": "Saliba", "made": 32, "received": 26, "total": 58, "pct": 3.9}, {"name": "Dembele", "made": 23, "received": 33, "total": 56, "pct": 3.7}]}, "press_game": [{"label": "FRA 4-1 AUS", "phases": {"opening": {"gri": 7, "total": 29, "pct": 24}, "after_fra": {"gri": 31, "total": 179, "pct": 17}, "after_opp": {"gri": 5, "total": 41, "pct": 12}}}, {"label": "FRA 2-1 DEN", "phases": {"opening": {"gri": 36, "total": 181, "pct": 20}, "after_fra": {"gri": 3, "total": 85, "pct": 4}, "after_opp": {"gri": 4, "total": 48, "pct": 8}}}, {"label": "FRA 0-1 TUN", "phases": {"opening": {"gri": 0, "total": 245, "pct": 0}, "after_fra": {"gri": 0, "total": 0, "pct": 0}, "after_opp": {"gri": 6, "total": 68, "pct": 9}}}, {"label": "FRA 3-1 POL", "phases": {"opening": {"gri": 13, "total": 103, "pct": 13}, "after_fra": {"gri": 19, "total": 128, "pct": 15}, "after_opp": {"gri": 0, "total": 0, "pct": 0}}}, {"label": "FRA 2-1 ENG", "phases": {"opening": {"gri": 9, "total": 38, "pct": 24}, "after_fra": {"gri": 20, "total": 158, "pct": 13}, "after_opp": {"gri": 15, "total": 79, "pct": 19}}}, {"label": "FRA 2-0 MAR", "phases": {"opening": {"gri": 7, "total": 26, "pct": 27}, "after_fra": {"gri": 58, "total": 331, "pct": 18}, "after_opp": {"gri": 0, "total": 0, "pct": 0}}}, {"label": "FRA 3-3 ARG", "phases": {"opening": {"gri": 17, "total": 99, "pct": 17}, "after_fra": {"gri": 0, "total": 162, "pct": 0}, "after_opp": {"gri": 25, "total": 277, "pct": 9}}}], "press_total": {"opening": {"gri": 89, "total": 721, "pct": 12}, "after_fra": {"gri": 131, "total": 1043, "pct": 13}, "after_opp": {"gri": 55, "total": 513, "pct": 11}}, "gri_pass": {"opening": {"total": 74, "comp": 57, "lb": 11, "pct": 77, "lb_pct": 15}, "after_fra": {"total": 133, "comp": 118, "lb": 13, "pct": 89, "lb_pct": 10}, "after_opp": {"total": 74, "comp": 61, "lb": 9, "pct": 82, "lb_pct": 12}}, "sq_opening": {"n": 2, "goals": 0, "on_target": 1, "pressed": 1, "goal_pct": 0, "on_tgt_pct": 50, "pressed_pct": 50}, "sq_after_fra": {"n": 2, "goals": 0, "on_target": 0, "pressed": 0, "goal_pct": 0, "on_tgt_pct": 0, "pressed_pct": 0}, "sq_after_opp": {"n": 1, "goals": 0, "on_target": 0, "pressed": 1, "goal_pct": 0, "on_tgt_pct": 0, "pressed_pct": 100}, "totals": {"tw_shots": 44, "tw_goals": 4, "tw_seqs": 224, "wo_shots": 53, "wo_goals": 12, "wo_seqs": 975}};
+var PC = {'Mbappe':'#e74c3c','Tchouameni':'#3498db','Giroud':'#27ae60','Griezmann':'#f39c12','Rabiot':'#9b59b6','Dembele':'#1abc9c','T.Hernandez':'#e67e22','Upamecano':'#e91e63','Kounde':'#00bcd4','Varane':'#8bc34a','Konate':'#ff5722','Lloris':'#607d8b','Coman':'#d4ac0d','Fofana':'#a93226','Kolo Muani':'#1f618d','Camavinga':'#117a65','Thuram':'#784212','Pavard':'#616a6b','Saliba':'#4a235a','Disasi':'#0b5345'};
+function pc(n){var h=PC[n]||'#888888';var r=parseInt(h.slice(1,3),16);var g2=parseInt(h.slice(3,5),16);var b=parseInt(h.slice(5,7),16);return 'rgba('+r+','+g2+','+b+',0.8)';}
+function showTab(name,btn){var ps=document.querySelectorAll('.pane');for(var i=0;i<ps.length;i++)ps[i].classList.remove('active');var ts=document.querySelectorAll('.tab');for(var i=0;i<ts.length;i++)ts[i].classList.remove('active');document.getElementById('pane-'+name).classList.add('active');if(btn)btn.classList.add('active');}
+var baseOpts={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'#1a1a1a',titleColor:'#f0f0f0',bodyColor:'#999',borderColor:'#333',borderWidth:1}},scales:{x:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#666'}},y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#666'}}}};
+function cloneOpts(){return JSON.parse(JSON.stringify(baseOpts));}
+function mkBar(id,labels,ds,ytitle){var o=cloneOpts();o.scales.y.title={display:true,text:ytitle,color:'#666',font:{size:10}};o.plugins.legend={display:true,labels:{color:'#999',font:{size:10}}};new Chart(document.getElementById(id),{type:'bar',data:{labels:labels,datasets:ds},options:o});}
+function mkHBar(id,data,colorFn){var o=cloneOpts();o.indexAxis='y';o.plugins.tooltip={backgroundColor:'#1a1a1a',titleColor:'#f0f0f0',bodyColor:'#999',borderColor:'#333',borderWidth:1,callbacks:{label:function(ctx){var d=data[ctx.dataIndex];return [d.name+': '+d.total,(d.pct||0)+'% comp'];}}};new Chart(document.getElementById(id),{type:'bar',data:{labels:data.map(function(d){return d.name;}),datasets:[{data:data.map(function(d){return d.total;}),backgroundColor:data.map(function(d){return colorFn(d.name);})}]},options:o});}
+var GL=D.game_labels,inv=D.inv;
+var sw=inv.map(function(d){return d['with'].sps;});
+var swo=inv.map(function(d){return d['without'].sps;});
+var cw=inv.map(function(d){return d['with'].cps;});
+var cwo=inv.map(function(d){return d['without'].cps;});
+var pw=inv.map(function(d){return d['with'].pc;});
+var pwo=inv.map(function(d){return d['without'].pc;});
+var lw=inv.map(function(d){return d['with'].lbps;});
+var lwo=inv.map(function(d){return d['without'].lbps;});
+var tlbw=0,tlbn=0,tlbo=0,tlbon=0;
+for(var i=0;i<inv.length;i++){tlbw+=inv[i]['with'].lbps*inv[i]['with'].n;tlbn+=inv[i]['with'].n;tlbo+=inv[i]['without'].lbps*inv[i]['without'].n;tlbon+=inv[i]['without'].n;}
+var la=(tlbw/Math.max(tlbn,1)).toFixed(3);
+var lb2=(tlbo/Math.max(tlbon,1)).toFixed(3);
+document.getElementById('klb').textContent=la;
+document.getElementById('klbr').textContent=(la/Math.max(lb2,0.001)).toFixed(1)+'x vs without ('+lb2+')';
+mkBar('cInvShots',GL,[{label:'With Griezmann',data:sw,backgroundColor:'rgba(243,156,18,0.75)',barPercentage:0.35},{label:'Without',data:swo,backgroundColor:'rgba(231,76,60,0.75)',barPercentage:0.35}],'shots/seq');
+mkBar('cInvChances',GL,[{label:'With Griezmann',data:cw,backgroundColor:'rgba(243,156,18,0.75)',barPercentage:0.35},{label:'Without',data:cwo,backgroundColor:'rgba(231,76,60,0.75)',barPercentage:0.35}],'chances/seq');
+mkBar('cInvComp',GL,[{label:'With Griezmann',data:pw,backgroundColor:'rgba(243,156,18,0.75)',barPercentage:0.35},{label:'Without',data:pwo,backgroundColor:'rgba(231,76,60,0.75)',barPercentage:0.35}],'pass%');
+mkBar('cInvLB',GL,[{label:'With Griezmann',data:lw,backgroundColor:'rgba(243,156,18,0.75)',barPercentage:0.35},{label:'Without',data:lwo,backgroundColor:'rgba(231,76,60,0.75)',barPercentage:0.35}],'lines broken/seq');
+var pl=['Game start','After Fra goal','After Opp goal'];
+var pts=['opening','after_fra','after_opp'];
+var gp=pts.map(function(p){return D['sq_'+p].goal_pct;});
+var ot=pts.map(function(p){return D['sq_'+p].on_tgt_pct-D['sq_'+p].goal_pct;});
+var off=pts.map(function(p){return 100-D['sq_'+p].on_tgt_pct;});
+var pr=pts.map(function(p){return D['sq_'+p].pressed_pct;});
+var so=cloneOpts();
+so.scales.x.stacked=true;so.scales.y.stacked=true;so.scales.y.max=100;
+so.scales.y.title={display:true,text:'% of shots',color:'#666',font:{size:10}};
+so.plugins.legend={display:true,labels:{color:'#999',font:{size:10}}};
+new Chart(document.getElementById('cShotOut'),{type:'bar',data:{labels:pl,datasets:[{label:'Goal%',data:gp,backgroundColor:'rgba(39,174,96,0.8)',stack:'a'},{label:'On target%',data:ot,backgroundColor:'rgba(52,152,219,0.7)',stack:'a'},{label:'Off/blocked',data:off,backgroundColor:'rgba(231,76,60,0.5)',stack:'a'}]},options:so});
+var sp=cloneOpts();
+sp.plugins.legend={display:true,labels:{color:'#999',font:{size:10}}};
+sp.scales.y.title={display:true,text:'%',color:'#666',font:{size:10}};
+new Chart(document.getElementById('cShotPress'),{type:'bar',data:{labels:pl,datasets:[{label:'Pressed%',data:pr,backgroundColor:'rgba(243,156,18,0.75)',barPercentage:0.35},{label:'Goal%',data:gp,backgroundColor:'rgba(39,174,96,0.75)',barPercentage:0.35}]},options:sp});
+mkHBar('cNetOpen',D.network.opening,pc);
+mkHBar('cNetFra', D.network.after_fra,pc);
+mkHBar('cNetOpp', D.network.after_opp,pc);
+mkHBar('cTOpen',D.gri_targets.opening,pc);
+mkHBar('cTFra', D.gri_targets.after_fra,pc);
+mkHBar('cTOpp', D.gri_targets.after_opp,pc);
+mkHBar('cSources',D.gri_sources,pc);
+var po=cloneOpts();
+po.plugins.legend={display:true,labels:{color:'#999',font:{size:10}}};
+po.scales.y.max=25;
+po.scales.y.title={display:true,text:'% of France press events',color:'#666',font:{size:10}};
+po.plugins.tooltip={backgroundColor:'#1a1a1a',titleColor:'#f0f0f0',bodyColor:'#999',borderColor:'#333',borderWidth:1,callbacks:{label:function(ctx){var g=D.press_game[ctx.dataIndex];var pt2=pts[ctx.datasetIndex];var d=g.phases[pt2];return ctx.dataset.label+': '+d.pct+'% ('+d.gri+'/'+d.total+')';}}};
+new Chart(document.getElementById('cPressGame'),{type:'bar',data:{labels:GL,datasets:[{label:'Game start',data:D.press_game.map(function(g){return g.phases.opening.pct;}),backgroundColor:'rgba(39,174,96,0.7)',barPercentage:0.25},{label:'After Fra goal',data:D.press_game.map(function(g){return g.phases.after_fra.pct;}),backgroundColor:'rgba(243,156,18,0.7)',barPercentage:0.25},{label:'After Opp goal',data:D.press_game.map(function(g){return g.phases.after_opp.pct;}),backgroundColor:'rgba(231,76,60,0.7)',barPercentage:0.25}]},options:po});
+var pc2=D.gri_pass;
+mkBar('cPassComp',pl,[{label:'Completion%',data:pts.map(function(p){return pc2[p].pct;}),backgroundColor:'rgba(243,156,18,0.75)',barPercentage:0.4},{label:'Line-breaking%',data:pts.map(function(p){return pc2[p].lb_pct;}),backgroundColor:'rgba(52,152,219,0.6)',barPercentage:0.4}],'%');
+</script>
+</body>
+</html>
